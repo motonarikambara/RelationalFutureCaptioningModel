@@ -1,0 +1,62 @@
+# ---------- repo-specific
+/data/
+/experiments/
+/provided_embeddings*/
+/provided_models*/
+/provided_profiling*/
+/rt_yc2_feat/
+/tests_*/
+/cache_caption/
+/annotations/
+/wandb/
+/error_analysis/
+/ponnet_data/*.mp4
+/ponnet_data/__pycache__/
+/ponnet_data/s3d*
+/ponnet_data/S3D*/
+
+
+# ---------- general
+
+# big files
+*.npz
+*.h5
+*.bin
+*.gz
+*.pkl
+*.pt
+*-ubyte
+
+# pycharm
+.idea/
+*/.idea/
+
+# temp files
+.directory
+nohup.out
+~$*.*
+.nfs*
+.DS_Store
+*.swp
+*.exe.stackdump
+.~lock.*
+
+# python
+__pycache__/
+.pytest_cache/
+.ipynb_checkpoints
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# testing
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
