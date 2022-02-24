@@ -1,6 +1,6 @@
 # RelationaFutureCaptioningModel (RFCM)
 
-<p align="center"><img src="assets/logo.png" alt="Logo" title="Logo" /></p>
+<p align="center"><img src="assets/eye-catch.jpg" alt="Eye-catch" title="eye-catch" /></p>
 
 This code implements the Relational Future Captioning Model (RFCM).
 
