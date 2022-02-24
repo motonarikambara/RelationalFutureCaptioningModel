@@ -1,5 +1,5 @@
 """
-Show retrieval results.
+Show captioning results.
 """
 
 from coot.configs_retrieval import ExperimentTypesConst
