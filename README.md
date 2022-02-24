@@ -28,8 +28,8 @@ tar -xzvf youcook2-fc.tar.gz
 ## Precompute all the text features
 
 ~~~bash
-python data_read_youcook2_meta.py
-python precompute_text.py youcook2 --cuda
+python scripts/data_read_youcook2_meta.py
+python scripts/precompute_text.py youcook2 --cuda
 ~~~
 
 
