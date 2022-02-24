@@ -34,13 +34,7 @@ python precompute_text.py youcook2 --cuda
 
 ~~~bash
 # YouCook2-FC
-# Train RFCM on COOT clip embeddings
-python train_caption.py -c config/caption/paper2020/yc2_100m_coot_clip_mart.yaml
+# Train RFCM on COOT clip embeddings and show results
+./rfcm.sh
 
-# show trained results
-python show_caption.py -m base
-
-# evaluate provided models
-python train_caption.py -c config/caption/paper2020/yc2_100m_coot_vidclip_mart.yaml --validate --load_model provided_models_caption/yc2_100m_coot_vidclip_mart.pth
-# etc.
 ~~~
