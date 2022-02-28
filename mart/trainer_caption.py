@@ -39,7 +39,6 @@ from nntrainer.metric import (
 from nntrainer.models import BaseModelManager
 from nntrainer.trainer_configs import BaseTrainerState
 from nntrainer.utils import TrainerPathConst
-import wandb
 
 
 def cal_performance(pred, gold):
@@ -310,7 +309,6 @@ class MartTrainer(trainer_base.BaseTrainer):
             val_loader: Validation dataloader.
         """
         loss_delta = 1000.0
-        wandb.init(name="ours", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
@@ -458,7 +456,6 @@ class MartTrainer(trainer_base.BaseTrainer):
 
             # log train statistics
             train_loss /= num_steps
-            wandb.log({"train_loss": train_loss})
             loss_per_word = 1.0 * total_loss / n_word_total
             accuracy = 1.0 * n_word_correct / n_word_total
             self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
@@ -652,8 +649,6 @@ class MartTrainer(trainer_base.BaseTrainer):
         self.val_steps += 1
         batch_loss /= batch_idx
         loss_delta = self.beforeloss - batch_loss
-        wandb.log({"val_loss_diff": loss_delta})
-        wandb.log({"val_loss": batch_loss})
 
         # ---------- validation done ----------
 
@@ -732,7 +727,6 @@ class MartTrainer(trainer_base.BaseTrainer):
 
         # find field which determines whether this is a new best epoch
         # "Bleu_4", "METEOR", "ROUGE_L", "CIDEr"
-        wandb.log({"val_BLEU4": flat_metrics["Bleu_4"], "val_METEOR": flat_metrics["METEOR"], "val_ROUGE_L": flat_metrics["ROUGE_L"], "val_CIDEr": flat_metrics["CIDEr"]})
         if self.cfg.val.det_best_field == "cider":
             # print(flat_metrics)
             # val_score = flat_metrics["CIDEr"] + flat_metrics["ROUGE_L"]
@@ -924,7 +918,6 @@ class MartTrainer(trainer_base.BaseTrainer):
         pbar.close()
         self.test_steps += 1
         test_loss /= num_batch
-        wandb.log({"test_loss": test_loss})
 
 
         # ---------- validation done ----------
@@ -992,7 +985,6 @@ class MartTrainer(trainer_base.BaseTrainer):
             )
         )
         self.higest_test = flat_metrics
-        wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
 
 
     def get_opt_state(self) -> Dict[str, Dict[str, nn.Parameter]]:

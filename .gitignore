@@ -8,7 +8,6 @@
 /tests_*/
 /cache_caption/
 /annotations/
-/wandb/
 /error_analysis/
 /ponnet_data/*.mp4
 /ponnet_data/__pycache__/

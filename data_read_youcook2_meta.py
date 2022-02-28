@@ -26,8 +26,8 @@ def main():
 
     # setup dataset path
     path_data = args.data_path if args.data_path is not None else repo_config.DATA_PATH
-    path_dataset = Path(path_data) / "youcook2"
-    captions_path = Path("annotations") / "youcook2"
+    path_dataset = Path(path_data) / "youcook2_next"
+    captions_path = Path("annotations") / "youcook2_next"
     print(f"Working on dataset path {path_dataset} captions from {captions_path}")
 
     # setup other paths
