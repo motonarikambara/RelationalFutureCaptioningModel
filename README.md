@@ -25,6 +25,9 @@ The METEOR metric requires `java`. Either install the latest Java 1.8 through th
 tar -xzvf provided_embeddings.tar.gz
 tar -xzvf provided_models_caption.tar.gz
 tar -xzvf youcook2-fc.tar.gz
+cp -r data/youcook2 data/youcook2_next
+mkdir experiments
+mkdir experiments/caption
 ~~~
 
 ## Precompute all the text features
@@ -36,7 +39,7 @@ python precompute_text.py youcook2 --cuda
 
 ### Rebuild MART cache
 
-Download [glove]( http://nlp.stanford.edu/data/glove.6B.zip)
+Download [glove](http://nlp.stanford.edu/data/glove.6B.zip)
 ~~~bash
 mkdir pretrained_models
 mv glove* pretrained_models/
