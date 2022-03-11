@@ -39,7 +39,7 @@ python precompute_text.py youcook2 --cuda
 
 ### Rebuild MART cache
 
-Download [glove](http://nlp.stanford.edu/data/glove.6B.zip)
+Download [glove](https://drive.google.com/file/d/1G-arTgUgfqTRKkui-euPZFrPK63mMYPA/view?usp=sharing)
 ~~~bash
 mkdir pretrained_models
 mv glove* pretrained_models/
