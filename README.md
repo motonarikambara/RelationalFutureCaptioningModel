@@ -25,7 +25,7 @@ The METEOR metric requires `java`. Either install the latest Java 1.8 through th
 tar -xzvf provided_embeddings.tar.gz
 tar -xzvf provided_models_caption.tar.gz
 tar -xzvf youcook2-fc.tar.gz
-cp -r data/youcook2 data/youcook2_next
+cp -r data/youcook2_next data/youcook2
 mkdir experiments
 mkdir experiments/caption
 ~~~
