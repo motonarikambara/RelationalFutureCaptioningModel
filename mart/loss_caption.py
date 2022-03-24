@@ -47,5 +47,4 @@ class LabelSmoothingLoss(nn.Module):
         output = self.log_softmax(output[valid_indices])
         model_prob = self.one_hot.repeat(target.size(0), 1)
         model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
-        # print(model_prob)
         return F.kl_div(output, model_prob, reduction="sum")

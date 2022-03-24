@@ -8,6 +8,7 @@ from typing import Any, Dict
 def add_mart_args(parser: argparse.ArgumentParser) -> None:
     """
     Add some additional arguments that are required for mart.
+
     Args:
         parser: Command line argument parser.
     """
@@ -44,10 +45,12 @@ def update_mart_config_from_args(
 ) -> Dict[str, Any]:
     """
     Modify config given script arguments.
+
     Args:
         config: Config dictionary.
         args: Arguments.
         verbose: Print message when updating the config.
+
     Returns:
         Updated config dict.
     """
@@ -59,7 +62,6 @@ def update_mart_config_from_args(
         assert args.dataset_max > 0, "--dataset_max must be positive int."
         config["dataset_train"]["max_datapoints"] = args.dataset_max
         config["dataset_val"]["max_datapoints"] = args.dataset_max
-        config["loss_weight"] = args.loss_weight
         if verbose:
             print(
                 f"    Change config: Set dataset_(train|val).max_datapoints to {args.dataset_max}"

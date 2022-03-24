@@ -273,7 +273,7 @@ class BaseTrainer:
             return True
         return False
 
-    def check_early_stop(self, loss_delta) -> bool:
+    def check_early_stop(self) -> bool:
         """
         Check if training should be stopped at this point.
 
@@ -292,8 +292,7 @@ class BaseTrainer:
         # log infos
         self.logger.info(f"Experiment ---------- {self.exp.exp_group}/{self.exp.exp_name}/{self.exp.run_name} "
                          f"---------- epoch current/best/bad: {current_epoch}/{best_epoch}/{bad_epochs}")
-        # if bad_epochs >= self.cfg.val.det_best_terminate_after:
-        if loss_delta <= 10:
+        if bad_epochs >= self.cfg.val.det_best_terminate_after:
             # stop early
             self.logger.info(f"No improvement since {bad_epochs} epochs, end of training.")
             return True
@@ -314,7 +313,7 @@ class BaseTrainer:
         do_val = do_val or self.state.current_epoch == self.cfg.train.num_epochs
         return do_val
 
-    def check_is_new_best(self, result: float, before) -> bool:
+    def check_is_new_best(self, result: float) -> bool:
         """
         Check if the given result improves over the old best.
 
@@ -327,11 +326,7 @@ class BaseTrainer:
         old_best = self.state.det_best_field_best
 
         # check if this is a new best
-        # is_best = self._check_if_current_score_is_best(result, old_best)
-        if result < before:
-            is_best = True
-        else:
-            is_best = False
+        is_best = self._check_if_current_score_is_best(result, old_best)
 
         # log info
         old_best_str = f"{old_best:.5f}" if old_best is not None else "NONE"

@@ -5,21 +5,18 @@ Originally published by https://github.com/jayleicn/recurrent-transformer under 
 Reworked by https://github.com/gingsi/coot-videotext under Apache 2 license
 """
 
-import numpy as np
-
 from coot.configs_retrieval import ExperimentTypesConst
 from mart import arguments_mart
 from mart.configs_mart import MartConfig as Config
 from mart.model import create_mart_model
 from mart.recursive_caption_dataset import create_mart_datasets_and_loaders
-from mart.trainer_caption import MartTrainer
+from mart.trainer_mart import MartTrainer
 from nntrainer import arguments, utils
 from nntrainer.utils_torch import set_seed
 from nntrainer.utils_yaml import load_yaml_config_file
-import datetime
 
 
-EXP_TYPE = ExperimentTypesConst.CAPTION
+EXP_TYPE = ExperimentTypesConst.MART
 
 
 def main():
@@ -48,20 +45,15 @@ def main():
         print(cfg)
 
     # set seed
-    verb = "Set seed"
-    if cfg.random_seed is None:
-        cfg.random_seed = np.random.randint(0, 2 ** 15, dtype=np.int32)
-        verb = "Randomly generated seed"
-    print(f"{verb} {cfg.random_seed} deterministic {cfg.cudnn_deterministic} "
-          f"benchmark {cfg.cudnn_benchmark}")
-    set_seed(cfg.random_seed, cudnn_deterministic=cfg.cudnn_deterministic, cudnn_benchmark=cfg.cudnn_benchmark)
+    if cfg.random_seed is not None:
+        print(f"Set seed to {cfg.random_seed}")
+        set_seed(cfg.random_seed, set_deterministic=False)  # set deterministic via config if needed
 
     # create dataset
-    train_set, val_set, train_loader, val_loader, test_set, test_loader = create_mart_datasets_and_loaders(
+    train_set, val_set, train_loader, val_loader = create_mart_datasets_and_loaders(
         cfg, args.coot_feat_dir, args.annotations_dir, args.video_feature_dir)
 
-    for i in range(args.start_run):
-        run_number = datetime.datetime.now()
+    for i, run_number in enumerate(range(args.start_run, args.start_run + args.num_runs)):
         run_name = f"{args.run_name}{run_number}"
 
         # create model from config
@@ -89,10 +81,8 @@ def main():
             trainer.validate_epoch(val_loader)
         else:
             # run training
-            trainer.train_model(train_loader, val_loader, test_loader)
+            trainer.train_model(train_loader, val_loader)
 
-
-            # trainer.validate_epoch(test_loader, test=True)
         # done with this round
         trainer.close()
         del model

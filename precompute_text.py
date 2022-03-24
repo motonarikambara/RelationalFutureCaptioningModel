@@ -196,13 +196,20 @@ def main():
 
         total_max_seq_len = batch.tokens.shape[1]
         if total_max_seq_len <= max_text_len:
+            # everything is fine
+            # compute model output and read hidden states
             model_outputs = model(input_ids=batch.tokens, attention_mask=batch.mask, output_hidden_states=True)
             hidden_states = model_outputs["hidden_states"]
+            # pbar.write(f"tokens {batch.tokens.shape[1]}")
+            # pbar.write(f"outputs {list(state.shape[1] for state in hidden_states)}")
+            # concatenate the features from the requested layers of the hidden state (-1 is the output layer)
             features = []
             for layer_num in layer_list_int:
                 layer_features = hidden_states[layer_num]
                 features.append(layer_features.detach().cpu().numpy())
+            # concatenate features of individual hidden layers
             features = np.concatenate(features, axis=-1)  # shape (batch_size, max_sent_len, num_layers * feat_dim)
+            # pbar.write(f"features {features.shape}")
         else:
             # if batch tokens is too long we need multiple steps depending on stride
             stride = max_text_len // args.token_stride_factor
@@ -217,6 +224,9 @@ def main():
                 these_model_outputs = model(input_ids=these_tokens, attention_mask=these_masks,
                                             output_hidden_states=True)
                 these_hidden_states = these_model_outputs["hidden_states"]
+                # pbar.write(f"tokens {these_tokens.shape[1]}")
+                # pbar.write(f"outputs {list(state.shape[1] for state in these_hidden_states)}")
+                # concatenate the features from the requested layers of the hidden state (-1 is the output layer)
                 features = []
                 for layer_num in layer_list_int:
                     layer_features = these_hidden_states[layer_num]

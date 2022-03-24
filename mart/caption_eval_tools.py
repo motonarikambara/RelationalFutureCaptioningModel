@@ -21,8 +21,8 @@ def get_reference_files(
     Returns:
         Dictionary with key: evaluation_mode (val, test) and value: list of annotation files.
     """
+    annotations_dir = Path(annotations_dir) / dset_name
     if dset_name == "activitynet":
-        annotations_dir = Path(annotations_dir) / dset_name
         return {
             "val": [
                 annotations_dir / "captioning_val_1_para.json",
@@ -34,10 +34,10 @@ def get_reference_files(
             ],
         }
     if dset_name == "youcook2":
-        tmp_path = "youcook2_next"
-        annotations_dir = Path(annotations_dir) / tmp_path
+        return {"val": [annotations_dir / "captioning_val_para.json"]}
+    if dset_name == "ponnet":
         if test:
-            return {"test": [annotations_dir / "captioning_val_para.json"]}
+            return {"test": [annotations_dir / "captioning_test_para.json"]}
         else:
-            return {"val": [annotations_dir / "captioning_val2_para.json"]}
+            return {"val": [annotations_dir / "captioning_val_para.json"]}
     raise ValueError(f"Dataset unknown {dset_name}")
