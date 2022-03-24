@@ -10,6 +10,10 @@
 /annotations/
 /error_analysis/
 /ponnet_data/
+/assets/
+/pretrained*/
+/wandb/
+
 
 
 # ---------- general
