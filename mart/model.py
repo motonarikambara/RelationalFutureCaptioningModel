@@ -494,8 +494,9 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.attention = Attention(cfg, m=3)
+        # self.attention = Attention(cfg, m=3)
         # self.attention = RelationalSelfAttention(cfg)
+        self.attention = MultiHeadRSA(cfg)
         self.output = TrmFeedForward(cfg)
         # self.batchnorm = nn.BatchNorm1d(3)
         self.layernorm = nn.LayerNorm(384)
@@ -506,12 +507,12 @@ class TrmEncLayer(nn.Module):
             x: (N, L, D)
         Returns:
         """
-        # tmp_x = x.clone()
-        # target = x[:, 1, :].clone()
-        # target = self.attention(target, tmp_x)
+        tmp_x = x.clone()
+        target = x[:, 1, :].clone()
+        target = self.attention(target, tmp_x)
 
-        # x[:, 1, :] = target.clone()
-        x = self.attention(x)
+        x[:, 1, :] = target.clone()
+        # x = self.attention(x)
         x = self.output(x, x)  # (N, L, D)
         x = self.layernorm(x)
         return x
@@ -561,7 +562,9 @@ class EmbeddingsWithVideo(nn.Module):
         self.word_fc = nn.Sequential(
             LayerNorm(cfg.word_vec_size, eps=cfg.layer_norm_eps),
             nn.Dropout(cfg.hidden_dropout_prob),
-            nn.Linear(cfg.word_vec_size, cfg.hidden_size),
+            nn.Linear(cfg.word_vec_size, cfg.hidden_size * 2),
+            nn.ReLU(True),
+            nn.Linear(cfg.hidden_size * 2, cfg.hidden_size),
             nn.ReLU(True),
             LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
         )
@@ -726,6 +729,85 @@ class RelationalSelfAttention(nn.Module):
         output = self.layernorm(output)
 
         return output
+
+
+class MultiHeadRSA(nn.Module):
+    def __init__(self, cfg, m=3):
+        super().__init__()
+        self.cfg = cfg
+        self.m = m
+        self.hidden_size = 384
+        self.head_num = 8
+        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        self.h =\
+            torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
+        self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        self.one = torch.ones((m, 1)).cuda()
+        self.layernorm = LayerNorm(self.hidden_size)
+
+    def forward(self, target, cont):
+        query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
+        key = self.key_layer(cont)
+        value = self.value_layer(cont)
+
+        # split
+        query = self._split_head(query)  # [batch_size, head_num, q_length, hidden_dim/head_num]
+        key = self._split_head(key)  # [batch_size, head_num, m_length, hidden_dim/head_num]
+        value = self._split_head(value)  # [batch_size, head_num, m_length, hidden_dim/head_num]
+
+        # basic kernel
+        kernel_v = torch.matmul(self.p, query).reshape(-1, 1, self.m)
+
+        # relational kernel
+        q = torch.matmul(self.one, torch.transpose(query, 1, 2))
+        x_q = torch.mul(q, key)
+        x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
+        kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
+        kernel = kernel_v + kernel_r
+        
+        # relational context
+        xg = value.clone()
+        xg = torch.transpose(xg, 1, 2)
+        _xg = torch.matmul(xg, self.g)
+        x_nr = torch.matmul(value, _xg)
+        context = x_nr + value
+
+        # fusion
+        output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
+        output = self._combine_head(output)  # [batch_size, q_length, hidden_dim]
+        output = self.layernorm(output)
+
+        return output
+
+    def _split_head(self, x: torch.Tensor):
+        '''
+        入力の tensor の hidden_dim の次元をいくつかのヘッドに分割します。
+        入力 shape: [batch_size, length, hidden_dim] の時
+        出力 shape: [batch_size, head_num, length, hidden_dim//head_num]
+        となります。
+        '''
+        batch_size, length, hidden_dim = x.shape
+        # x_size = torch.Tensor([[x_a], [x_b], [x_c]])
+        # batch_size, length, hidden_dim = torch.unbind(x_size)
+        print(batch_size, length, self.head_num, self.hidden_size // self.head_num)
+        x = torch.reshape(x, (batch_size, length, self.head_num, self.hidden_size // self.head_num))
+        return torch.transpose(x, [0, 2, 1, 3])
+
+    def _combine_head(self, x: torch.Tensor):
+        '''
+        入力の tensor の各ヘッドを結合します。 _split_head の逆変換です。
+        入力 shape: [batch_size, head_num, length, hidden_dim//head_num] の時
+        出力 shape: [batch_size, length, hidden_dim]
+        となります。
+        '''
+        x_a, x_b = x.shape
+        x_size = torch.Tensor([[x_a], [x_b]])
+        batch_size, length = torch.unbind(x_size)
+        x = torch.transpose(x, [0, 2, 1, 3])
+        return torch.reshape(x, (batch_size, length, self.hidden_size))
 
 
 class TimeSeriesMoudule(nn.Module):
@@ -961,3 +1043,28 @@ class RecursiveTransformer(nn.Module):
                 # 1.0 * snt_loss + 0.01 * fut_loss + 0.005 * (1.0 / cont_loss) + 10 * action_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
+
+
+# class FeedForwardNetwork(tf.keras.models.Model):
+#     '''
+#     Transformer 用の Position-wise Feedforward Neural Network です。
+#     '''
+#     def __init__(self, hidden_dim: int, dropout_rate: float, *args, **kwargs) -> None:
+#         super().__init__(*args, **kwargs)
+#         self.hidden_dim = hidden_dim
+#         self.dropout_rate = dropout_rate
+
+#         self.filter_dense_layer = tf.keras.layers.Dense(hidden_dim * 4, use_bias=True,
+#                                                         activation=tf.nn.relu, name='filter_layer')
+#         self.output_dense_layer = tf.keras.layers.Dense(hidden_dim, use_bias=True, name='output_layer')
+#         self.dropout_layer = tf.keras.layers.Dropout(dropout_rate)
+
+#     def call(self, input: tf.Tensor, training: bool) -> tf.Tensor:
+#         '''
+#         FeedForwardNetwork を適用します。
+#         :param input: shape = [batch_size, length, hidden_dim]
+#         :return: shape = [batch_size, length, hidden_dim]
+#         '''
+#         tensor = self.filter_dense_layer(input)
+#         tensor = self.dropout_layer(tensor, training=training)
+#         return self.output_dense_layer(tensor)
