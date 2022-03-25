@@ -33,7 +33,7 @@ def get_reference_files(
                 annotations_dir / "captioning_test_2_para.json",
             ],
         }
-    if dset_name == "youcook2":
+    if dset_name == "youcook2_next":
         tmp_path = "youcook2_next"
         annotations_dir = Path(annotations_dir) / tmp_path
         if test:
