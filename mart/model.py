@@ -495,8 +495,7 @@ class TrmEncLayer(nn.Module):
         super().__init__()
         self.cfg = cfg
         # self.attention = Attention(cfg, m=3)
-        # self.attention = RelationalSelfAttention(cfg)
-        self.attention = MultiHeadRSA(cfg)
+        self.attention = RelationalSelfAttention(cfg)
         self.output = TrmFeedForward(cfg)
         # self.batchnorm = nn.BatchNorm1d(3)
         self.layernorm = nn.LayerNorm(384)
@@ -691,42 +690,74 @@ class RelationalSelfAttention(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.m = m
-        self.hidden_size = 384
-        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        self.hidden_size = 768
+        self.num_head = 12
+        if self.hidden_size % self.num_head == 0:
+            self.hid = int(self.hidden_size / self.num_head)
+        else:
+            print("#Head Error in RSA")
+            sys.exit()
+
+        # for single head
+        # self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        # self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        # self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        # self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+        # self.h =\
+        #     torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
+        # self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+
+        # for MHA
+        # self.query_layer = nn.Linear(self.num_head, self.hid, self.hid)
+        # self.key_layer = nn.Linear(self.num_head, self.hid, self.hid)
+        # self.value_layer = nn.Linear(self.num_head, self.hid, self.hid)
+        self.p = torch.randn((self.num_head, m, self.hid), requires_grad=True).cuda()
         self.h =\
-            torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
-        self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-        self.one = torch.ones((m, 1)).cuda()
-        self.layernorm = LayerNorm(self.hidden_size)
+            torch.randn((self.num_head, m * self.hid, m), requires_grad=True).cuda()
+        self.g = torch.randn((self.num_head, m, self.hid), requires_grad=True).cuda()
+
+        self.one = torch.ones((self.num_head, m, 1)).cuda()
+        self.norm_cont = nn.LayerNorm(self.hidden_size)
+        self.norm_query = nn.LayerNorm(self.hidden_size)
+        self.layernorm = nn.LayerNorm(self.hidden_size)
 
     def forward(self, target, cont):
-        query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
-        key = self.key_layer(cont)
-        value = self.value_layer(cont)
+        # query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
+        # key = self.key_layer(cont)
+        # value = self.value_layer(cont)
+        target = nn.Linear(384, self.hidden_size)
+        query = self.norm_query(target)
+        query = query.reshape(-1, self.hidden_size, 1)
+        cont = self.norm_cont(cont)
+        key = cont
+        value = cont
+
+        # Multi Head
+        query = query.reshape(-1, 1, self.num_head, self.hid).permute(0, 2, 1, 3)
+        key = key.reshape(-1, self.m, self.num_head, self.hid).permute(0, 2, 1, 3)
+        value =\
+            value.reshape(-1, self.m, self.num_head, self.hid).permute(0, 2, 1, 3)
 
         # basic kernel
-        kernel_v = torch.matmul(self.p, query).reshape(-1, 1, self.m)
+        kernel_v = torch.matmul(self.p, query.permute(0, 1, 3, 2)).reshape(-1, self.num_head, 1, self.m)
 
         # relational kernel
-        q = torch.matmul(self.one, torch.transpose(query, 1, 2))
+        q = torch.matmul(self.one, query)
         x_q = torch.mul(q, key)
-        x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
-        kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
+        x_q = x_q.reshape((-1, self.num_head, 1, self.m * self.hid))
+        kernel_r = torch.matmul(x_q, self.h).reshape(-1, self.num_head, 1, self.m)
         kernel = kernel_v + kernel_r
         
         # relational context
         xg = value.clone()
-        xg = torch.transpose(xg, 1, 2)
+        xg = torch.transpose(xg, 2, 3)
         _xg = torch.matmul(xg, self.g)
         x_nr = torch.matmul(value, _xg)
         context = x_nr + value
 
         # fusion
         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
-        output = self.layernorm(output)
+        # output = self.layernorm(output)
 
         return output
 
