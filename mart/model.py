@@ -700,7 +700,7 @@ class RelationalSelfAttention(nn.Module):
 
         # basic context
         # basic_cont = context.clone()
-        
+
         # relational context
         xg = value.clone()
         xg = torch.transpose(xg, 1, 2)
@@ -712,6 +712,59 @@ class RelationalSelfAttention(nn.Module):
 
         return output
 
+
+class MultiHeadRSA(nn.Module):
+    def __init__(self, cfg, m=3):
+        super().__init__()
+        self.cfg = cfg
+        self.m = m
+        self.hidden_size = 384
+        self.head = 12
+        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.p = torch.randn((self.head, m, self.hidden_size // self.head), requires_grad=True).cuda()
+        self.h =\
+            torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
+        self.g = torch.randn((self.head, m, self.hidden_size), requires_grad=True).cuda()
+        self.one = torch.ones((m, 1)).cuda()
+
+    def forward(self, target, cont):
+        if self.hidden_size % self.head == 0:
+            query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
+            key = self.key_layer(cont)
+            value = self.value_layer(cont)
+
+            tmp_size = self.hidden_size / self.head
+            query = query.reshape((-1, 1, self.head, tmp_size))
+            key = key.reshape((-1, self.m, self.head, tmp_size))
+            value = value.reshape((-1, self.m, self.head, tmp_size))
+
+            # basic kernel
+            kernel_v = torch.matmul(self.p, query).reshape(-1, self.head, 1, self.m)
+
+            # relational kernel
+            q = torch.matmul(self.one, query.permute(0, 1, 3, 2))
+            x_q = torch.mul(q, key)
+            x_q = x_q.reshape((-1, self.head, 1, self.m * self.hidden_size))
+            kernel_r = torch.matmul(x_q, self.h).reshape(-1, self.head, 1, self.m)
+            kernel = kernel_v + kernel_r
+
+            # basic context
+            # basic_cont = context.clone()
+
+            # relational context
+            xg = value.clone().transpose(2, 3)
+            xg = torch.transpose(xg, 2, 3)
+            _xg = torch.matmul(xg, self.g)
+            x_nr = torch.matmul(value, _xg)
+            context = x_nr + value
+
+            output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
+            return output
+        else:
+            print("hidden_size/head was wrong", file=sys.stderr)
+            sys.exit(1)
 
 
 class TimeSeriesMoudule(nn.Module):
@@ -929,7 +982,7 @@ class RecursiveTransformer(nn.Module):
                 cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
-            
+
             # caption_loss += 0.9 * snt_loss
             caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
