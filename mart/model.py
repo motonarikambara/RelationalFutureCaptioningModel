@@ -493,7 +493,8 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.attention = RelationalSelfAttention(cfg)
+        # self.attention = RelationalSelfAttention(cfg)
+        self.attention = MultiHeadRSA(cfg)
         # self.attention = Attention(cfg)
         self.output = TrmFeedForward(cfg)
 
@@ -720,14 +721,17 @@ class MultiHeadRSA(nn.Module):
         self.m = m
         self.hidden_size = 384
         self.head = 12
+        tmp_size = self.hidden_size // self.head
         self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.p = torch.randn((self.head, m, self.hidden_size // self.head), requires_grad=True).cuda()
+        self.p = torch.randn((self.head, m, tmp_size), requires_grad=True).cuda()
         self.h =\
-            torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
-        self.g = torch.randn((self.head, m, self.hidden_size), requires_grad=True).cuda()
+            torch.randn((self.head, m * tmp_size, m), requires_grad=True).cuda()
+        self.g = torch.randn((self.head, m, tmp_size), requires_grad=True).cuda()
         self.one = torch.ones((m, 1)).cuda()
+        self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size, self.hidden_size)
+        self.ln = nn.LayerNorm(self.hidden_size)
 
     def forward(self, target, cont):
         if self.hidden_size % self.head == 0:
@@ -735,18 +739,18 @@ class MultiHeadRSA(nn.Module):
             key = self.key_layer(cont)
             value = self.value_layer(cont)
 
-            tmp_size = self.hidden_size / self.head
-            query = query.reshape((-1, 1, self.head, tmp_size))
-            key = key.reshape((-1, self.m, self.head, tmp_size))
-            value = value.reshape((-1, self.m, self.head, tmp_size))
+            tmp_size = self.hidden_size // self.head
+            query = query.reshape((-1, 1, self.head, tmp_size)).permute(0, 2, 1, 3)
+            key = key.reshape((-1, self.m, self.head, tmp_size)).permute(0, 2, 1, 3)
+            value = value.reshape((-1, self.m, self.head, tmp_size)).permute(0, 2, 1, 3)
 
             # basic kernel
-            kernel_v = torch.matmul(self.p, query).reshape(-1, self.head, 1, self.m)
+            kernel_v = torch.matmul(self.p, query.permute(0, 1, 3, 2)).reshape(-1, self.head, 1, self.m)
 
             # relational kernel
-            q = torch.matmul(self.one, query.permute(0, 1, 3, 2))
+            q = torch.matmul(self.one, query)
             x_q = torch.mul(q, key)
-            x_q = x_q.reshape((-1, self.head, 1, self.m * self.hidden_size))
+            x_q = x_q.reshape((-1, self.head, 1, self.m * tmp_size))
             kernel_r = torch.matmul(x_q, self.h).reshape(-1, self.head, 1, self.m)
             kernel = kernel_v + kernel_r
 
@@ -754,17 +758,61 @@ class MultiHeadRSA(nn.Module):
             # basic_cont = context.clone()
 
             # relational context
-            xg = value.clone().transpose(2, 3)
+            xg = value.clone()
             xg = torch.transpose(xg, 2, 3)
             _xg = torch.matmul(xg, self.g)
             x_nr = torch.matmul(value, _xg)
             context = x_nr + value
 
             output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
+            output = self.ln(output)
+            output = self.ffn(output)
             return output
         else:
             print("hidden_size/head was wrong", file=sys.stderr)
             sys.exit(1)
+
+
+class FeedforwardNeuralNetModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(FeedforwardNeuralNetModel, self).__init__()
+        # Linear function 1: 784 --> 100
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        # Non-linearity 1
+        self.relu1 = nn.ReLU()
+
+        # Linear function 2: 100 --> 100
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        # Non-linearity 2
+        self.relu2 = nn.ReLU()
+
+        # Linear function 3: 100 --> 100
+        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
+        # Non-linearity 3
+        self.relu3 = nn.ReLU()
+
+        # Linear function 4 (readout): 100 --> 10
+        self.fc4 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        # Linear function 1
+        out = self.fc1(x)
+        # Non-linearity 1
+        out = self.relu1(out)
+
+        # Linear function 2
+        out = self.fc2(out)
+        # Non-linearity 2
+        out = self.relu2(out)
+
+        # Linear function 2
+        out = self.fc3(out)
+        # Non-linearity 2
+        out = self.relu3(out)
+
+        # Linear function 4 (readout)
+        out = self.fc4(out)
+        return out
 
 
 class TimeSeriesMoudule(nn.Module):
