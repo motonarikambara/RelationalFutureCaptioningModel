@@ -672,13 +672,13 @@ class CLIPloss(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.w = nn.Linear(25 * 768, 384)
+        self.w = nn.Linear(25 * 768, 512)
         self.t = torch.randn(1, requires_grad=True).cuda()
         self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
-        self.norm_i = nn.LayerNorm(384)
-        self.norm_t = nn.LayerNorm(384)
-    
+        self.norm_i = nn.LayerNorm(512)
+        self.norm_t = nn.LayerNorm(512)
+
     def forward(self, clip, text):
         text = torch.flatten(text, 1)
         text = self.w(text)
@@ -948,6 +948,7 @@ class TimeSeriesMoudule(nn.Module):
 #         self.future_gt = []
 #         if gt_clip is None:
 #             gt_clip = video_features[:, 1:4, :].clone().cuda()
+#         print(gt_clip.shape)
 #         # preprocess
 #         clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
 #         clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
@@ -1080,6 +1081,7 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
+        self.cfg.vocab_size = 252
         self.z_f = torch.randn(1, requires_grad=True).cuda()
         self.z_p = torch.randn(1, requires_grad=True).cuda()
         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
@@ -1103,6 +1105,8 @@ class RecursiveTransformer(nn.Module):
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
+        self.size_adjust = nn.Linear(512, 384)
+        self.upsampling = nn.Linear(384, 512)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
@@ -1134,48 +1138,51 @@ class RecursiveTransformer(nn.Module):
             module.bias.data.zero_()
 
     def forward_step(
-        self, input_ids, video_features, input_masks, token_type_ids, gt_clip
+        self, input_ids, video_features, input_masks, token_type_ids, gt_clip=None
     ):
         """
         single step forward in the recursive structure
         """
+        video_features = self.size_adjust(video_features)
         self.future_rec = []
         self.future_gt = []
         # preprocess
-        vid_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
+        # vid_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
+        if gt_clip is None:
+            gt_clip = video_features[:, 1:4, :].clone().cuda()
         clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
         clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
 
-        future_b = torch.zeros(video_features[:, 2, :].shape)
-        future_b = video_features[:, 2, :].clone()
+        future_b = torch.zeros(video_features[:, 3, :].shape)
+        future_b = video_features[:, 3, :].clone()
         future_b = self.pred_f(future_b)
         tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
-        vid_feats[:, 2, :] = tmp_feat_f
         clip_feats[:, 2, :] = self.z_f * tmp_feat_f + (1 - self.z_f) * future_b
 
         past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
         tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
-        vid_feats[:, 0, :] = past_feats.reshape((-1, 384))
+        # vid_feats[:, 0, :] = past_feats.reshape((-1, 384))
         past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
         clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
-        
-        video_features[:, 1:4, :] = vid_feats.clone()
+
         # Time Series Module
-        ts_feats, ts_feat = self.TSModule(clip_feats)
+        _, clip_feats = self.TSModule(clip_feats)
 
         embeddings = self.embeddings(
             input_ids, video_features, token_type_ids
         )  # (N, L, D)
+        # clip_his = torch.zeros((embeddings.shape)).cuda()
+        # clip_his = clip_his + ts_feats
         encoded_layer_outputs = self.encoder(
             embeddings, input_masks, output_all_encoded_layers=False
         )  # both outputs are list
         decoded_layer_outputs = self.transformerdecoder(
-            encoded_layer_outputs[-1], input_masks, ts_feat
+            encoded_layer_outputs[-1], input_masks, clip_feats
         )
-
         prediction_scores = self.decoder(
-            decoded_layer_outputs[-1] # (batch_size, 25, 768)
+            decoded_layer_outputs[-1]
         )  # (N, L, vocab_size)
+        future_b = self.upsampling(future_b)
         return decoded_layer_outputs[-1], prediction_scores, future_b
 
     # ver. future
@@ -1208,21 +1215,43 @@ class RecursiveTransformer(nn.Module):
         future_rec = []
         future_gt = []
         video_feat_list = []
-        for idx in range(step_size):
-            decoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
-                input_ids_list[idx],
-                video_features_list[idx],
-                input_masks_list[idx],
-                token_type_ids_list[idx],
-                gt_clip[idx],
-            )
-            future_gt.append(gt_clip[idx][:, 1, :])
-            future_rec.append(pred_future)
-            decoded_outputs_list.append(decoded_layer_outputs)
-            prediction_scores_list.append(prediction_scores)
-            video_feat_list.append(video_features_list[idx][:, 1, :])
-            action_score.append(prediction_scores[:, 3, :])
-        # compute loss, get predicted words
+        if gt_clip is not None:
+            for idx in range(step_size):
+                decoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+                    input_ids_list[idx],
+                    video_features_list[idx],
+                    input_masks_list[idx],
+                    token_type_ids_list[idx]
+                )
+                future_gt.append(gt_clip[idx])
+                future_rec.append(pred_future)
+                decoded_outputs_list.append(decoded_layer_outputs)
+                prediction_scores_list.append(prediction_scores)
+                action_score.append(prediction_scores[:, 3, :])
+                future_gt.append(gt_clip[idx][:, 0, :])
+                future_rec.append(pred_future)
+                decoded_outputs_list.append(decoded_layer_outputs)
+                prediction_scores_list.append(prediction_scores)
+                video_feat_list.append(video_features_list[idx][:, 1, :])
+                action_score.append(prediction_scores[:, 3, :])
+        else:
+            for idx in range(step_size):
+                decoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+                    input_ids_list[idx],
+                    video_features_list[idx],
+                    input_masks_list[idx],
+                    token_type_ids_list[idx]
+                )
+                decoded_outputs_list.append(decoded_layer_outputs)
+                prediction_scores_list.append(prediction_scores)
+                action_score.append(prediction_scores[:, 3, :])
+                future_gt.append(gt_clip[idx][:, 0, :])
+                future_rec.append(pred_future)
+                decoded_outputs_list.append(decoded_layer_outputs)
+                prediction_scores_list.append(prediction_scores)
+                video_feat_list.append(video_features_list[idx][:, 1, :])
+                action_score.append(prediction_scores[:, 3, :])
+            # compute loss, get predicted words
         caption_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
@@ -1240,7 +1269,7 @@ class RecursiveTransformer(nn.Module):
                 if gt_idx[0] in ACTION_WEIGHT:
                     action_loss += (1 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
                 else:
-                    action_loss += (1 / 3000) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 0.0
             # tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             # tmp_idx_list = input_labels_list[idx].view(-1)
