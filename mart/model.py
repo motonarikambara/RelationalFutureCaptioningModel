@@ -713,7 +713,7 @@ class RelationalSelfAttention(nn.Module):
             torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
         self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
         self.one = torch.ones((m, 1)).cuda()
-        self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size, self.hidden_size)
+        self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size * 2, self.hidden_size)
         self.ln = nn.LayerNorm(self.hidden_size)
 
     def forward(self, target, cont):
@@ -765,7 +765,7 @@ class MultiHeadRSA(nn.Module):
             torch.randn((self.head, m * tmp_size, m), requires_grad=True).cuda()
         self.g = torch.randn((self.head, m, tmp_size), requires_grad=True).cuda()
         self.one = torch.ones((m, 1)).cuda()
-        self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size, self.hidden_size)
+        self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size * 2, self.hidden_size)
         self.ln = nn.LayerNorm(self.hidden_size)
 
     def forward(self, target, cont):
@@ -1105,8 +1105,14 @@ class RecursiveTransformer(nn.Module):
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
-        self.size_adjust = nn.Linear(512, 384)
-        self.upsampling = nn.Linear(384, 512)
+        self.size_adjust = nn.Sequential(
+            nn.Linear(512, 384),
+            # nn.LayerNorm(input_size)
+        )
+        self.upsampling = nn.Sequential(
+            nn.Linear(384, 512),
+            # nn.LayerNorm(512)
+        )
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
