@@ -153,7 +153,138 @@ class LayerNorm(nn.Module):
         return self.weight * x + self.bias
 
 
+class CoAtNetC(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        input_size = cfg.hidden_size
+        self.f_c = nn.Sequential(
+            nn.Conv2d(input_size, input_size * 4, 1),
+            nn.Conv2d(input_size * 4, input_size * 4, 3, padding=1, groups=input_size * 4),
+            nn.Conv2d(input_size * 4, input_size, 1)
+        )
+    def forward(self, hidden_states):
+        batch_size = hidden_states.size(0)
+        dim = hidden_states.size(1)
+        size = hidden_states.size(2)
+        hidden_states = torch.reshape(hidden_states, (batch_size, 5, 5, size))
+        hidden_states = hidden_states.permute(0, 3, 1, 2)
+        hidden_states = self.f_c(hidden_states)
+        hidden_states = hidden_states.permute(0, 2, 3, 1)
+        hidden_states = torch.reshape(hidden_states, (batch_size, dim, size))
+
+        return hidden_states
+
+
+
 class SelfAttention(nn.Module):
+    """
+    Attentionの計算
+    """
+
+    def __init__(self, cfg):
+        super().__init__()
+        if cfg.hidden_size % cfg.num_attention_heads != 0:
+            raise ValueError(
+                "The hidden size (%d) is not a multiple of the number of attention "
+                "heads (%d)" % (cfg.hidden_size, cfg.num_attention_heads)
+            )
+        self.num_attention_heads = cfg.num_attention_heads
+        self.attention_head_size = int(cfg.hidden_size / cfg.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+
+        self.query_w = nn.Linear(cfg.hidden_size, self.all_head_size)
+        self.key_w = nn.Linear(cfg.hidden_size, self.all_head_size)
+        self.value_w = nn.Linear(cfg.hidden_size, self.all_head_size)
+
+        self.dropout = nn.Dropout(cfg.attention_probs_dropout_prob)
+        # self.conv_attention = ConvAttention(cfg)
+
+    def transpose_for_scores(self, x):
+        new_x_shape = x.size()[:-1] + (
+            self.num_attention_heads,
+            self.attention_head_size,
+        )  # (N, L, nh, dh)
+        x = x.view(*new_x_shape)
+        return x.permute(0, 2, 1, 3)  # (N, nh, L, dh)
+
+    def forward(self, query, key, value, attention_mask=None):
+        """
+        Args:
+            query_states: (N, Lq, D)
+            key_states: (N, L, D)
+            value_states: (N, L, D)
+            attention_mask: (N, Lq, L)
+
+        Returns:
+        """
+        # only need to mask the dimension where the softmax
+        # (last dim) is applied, as another dim (second last)
+        # will be ignored in future computation anyway
+        if attention_mask is not None:
+            attention_mask = (
+                1 - attention_mask.unsqueeze(1)
+            ) * -10000.0  # (N, 1, Lq, L)
+        mixed_query_layer = self.query_w(query)
+        mixed_key_layer = self.key_w(key)
+        mixed_value_layer = self.value_w(value)
+        query_layer = self.transpose_for_scores(mixed_query_layer)  # (N, nh, Lq, dh)
+        key_layer = self.transpose_for_scores(mixed_key_layer)  # (N, nh, L, dh)
+        value_layer = self.transpose_for_scores(mixed_value_layer)  # (N, nh, L, dh)
+        # depthwise_layer = self.conv_attention(query, value)
+        # Take the dot product between "query" and "key"
+        # to get the raw attention scores.
+        att_w = torch.matmul(query_layer, key_layer.transpose(-1, -2))  # (N, nh, Lq, L)
+        att_w = att_w / math.sqrt(self.attention_head_size)
+        if attention_mask is not None:
+            # Apply the attention mask is (precomputed for all layers
+            # in BertModel forward() function)
+            att_w = att_w + attention_mask
+        # Normalize the attention scores to probabilities.
+        attention_probs = nn.Softmax(dim=-1)(att_w)
+        # This is actually dropping out entire tokens to attend to, which might
+        # seem a bit unusual, but is taken from the original Transformer paper.
+        attention_probs = self.dropout(attention_probs)
+        context_layer = torch.matmul(attention_probs, value_layer)
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
+        context_layer = context_layer.view(*new_context_layer_shape)
+        return context_layer # + depthwise_layer
+
+
+class ConvAttention(nn.Module):
+    def __init__(self,cfg):
+        super().__init__()
+        if cfg.hidden_size % cfg.num_attention_heads != 0:
+            raise ValueError(
+                "The hidden size (%d) is not a multiple of the number of attention "
+                "heads (%d)" % (cfg.hidden_size, cfg.num_attention_heads)
+            )
+        self.num_attention_heads = cfg.num_attention_heads
+        self.attention_head_size = int(cfg.hidden_size / cfg.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+
+        self.query_w = nn.Linear(cfg.hidden_size, self.all_head_size)
+        self.value_w = nn.Linear(cfg.hidden_size, self.all_head_size)
+
+        dim = 768
+        self.depthwise_conv = nn.Conv2d(dim, dim, 3, groups=dim, padding=1)
+
+    def forward(self, query, value):
+        query_layer = self.query_w(query)
+        value_layer = self.value_w(value)
+        dim_v = int(value_layer.size(1))
+        batch_size = value_layer.size(0)
+        dim_v_sep = dim_v // 5
+        size_v = int(value_layer.size(2))
+        value_layer = torch.reshape(value_layer, (batch_size, dim_v_sep, dim_v_sep, size_v))
+        value_layer = self.depthwise_conv(value_layer.permute(0, 3, 1, 2))
+        value_layer = torch.reshape(value_layer.permute(0, 2, 3, 1), (batch_size, dim_v, size_v))
+        dp_w = torch.mul(query_layer, value_layer)
+
+        return dp_w
+
+
+class LambdaAttention(nn.Module):
     """
     Attentionの計算
     """
@@ -193,9 +324,6 @@ class SelfAttention(nn.Module):
 
         Returns:
         """
-        # only need to mask the dimension where the softmax
-        # (last dim) is applied, as another dim (second last)
-        # will be ignored in future computation anyway
         if attention_mask is not None:
             attention_mask = (
                 1 - attention_mask.unsqueeze(1)
@@ -206,20 +334,15 @@ class SelfAttention(nn.Module):
         query_layer = self.transpose_for_scores(mixed_query_layer)  # (N, nh, Lq, dh)
         key_layer = self.transpose_for_scores(mixed_key_layer)  # (N, nh, L, dh)
         value_layer = self.transpose_for_scores(mixed_value_layer)  # (N, nh, L, dh)
-        # Take the dot product between "query" and "key"
-        # to get the raw attention scores.
-        att_w = torch.matmul(query_layer, key_layer.transpose(-1, -2))  # (N, nh, Lq, L)
-        att_w = att_w / math.sqrt(self.attention_head_size)
+        key_layer = nn.Softmax(dim=-1)(key_layer)
+        att_kv = torch.matmul(key_layer, value_layer.transpose(-1, -2))
+        # print(att_kv.shape)
         if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers
-            # in BertModel forward() function)
-            att_w = att_w + attention_mask
-        # Normalize the attention scores to probabilities.
-        attention_probs = nn.Softmax(dim=-1)(att_w)
-        # This is actually dropping out entire tokens to attend to, which might
-        # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = self.dropout(attention_probs)
-        context_layer = torch.matmul(attention_probs, value_layer)
+            # print(attention_mask.shape)
+            att_kv = att_kv + attention_mask
+        att_w = torch.matmul(att_kv, query_layer) # (N, nh, L)
+        context_layer = att_w / math.sqrt(self.attention_head_size)
+
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
@@ -412,8 +535,12 @@ class EncoderWoMemory(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.layer = nn.ModuleList(
-            [LayerWoMemory(cfg) for _ in range(cfg.num_hidden_layers)]
+            [LayerWoMemory(cfg) for _ in range(2)]
         )
+        self.layer_c = nn.ModuleList(
+            [CoAtNetC(cfg) for _ in range(2)]
+        )
+
 
     def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, clip_feats=None):
         """
@@ -427,6 +554,10 @@ class EncoderWoMemory(nn.Module):
         Returns:
         """
         all_encoder_layers = []
+        for layer_idx, layer_module in enumerate(self.layer_c):
+            hidden_states = layer_module(hidden_states)
+            if output_all_encoded_layers:
+                all_encoder_layers.append(hidden_states)
         for layer_idx, layer_module in enumerate(self.layer):
             hidden_states = layer_module(hidden_states, attention_mask, clip_feats)
             if output_all_encoded_layers:
@@ -874,208 +1005,6 @@ class TimeSeriesMoudule(nn.Module):
         return ts_feats, tmp_feats
 
 
-# # MART model
-# class RecursiveTransformer(nn.Module):
-#     def __init__(self, cfg: MartConfig):
-#         super().__init__()
-#         self.cfg = cfg
-#         self.cfg.vocab_size = 252
-#         self.z_f = torch.randn(1, requires_grad=True).cuda()
-#         self.z_p = torch.randn(1, requires_grad=True).cuda()
-#         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
-#         self.TSModule = TimeSeriesMoudule(cfg)
-#         self.encoder = EncoderWoMemory(cfg)
-#         decoder_classifier_weight = (
-#             self.embeddings.word_embeddings.weight
-#             if self.cfg.share_wd_cls_weight
-#             else None
-#         )
-#         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
-#         self.transformerdecoder = Decoder(cfg)
-#         if self.cfg.label_smoothing != 0:
-#             self.loss_func = LabelSmoothingLoss(
-#                 cfg.label_smoothing, cfg.vocab_size, ignore_index=-1
-#             )
-#         else:
-#             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-#         self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
-#         self.actionloss_func = nn.CrossEntropyLoss()
-#         self.cliploss = CLIPloss()
-#         # clipの特徴量の次元
-#         input_size = 384
-#         self.size_adjust = nn.Linear(512, 384)
-#         self.upsampling = nn.Linear(384, 512)
-#         self.pred_f = nn.Sequential(
-#             nn.Linear(input_size, input_size * 2),
-#             nn.ReLU(),
-#             nn.Linear(input_size * 2, input_size),
-#             nn.ReLU(),
-#             nn.Dropout(0.1),
-#             nn.Linear(input_size, input_size),
-#         )
-#         self.ff = nn.Sequential(
-#             nn.Linear(input_size, input_size),
-#             nn.ReLU(),
-#             nn.Linear(input_size, input_size),
-#             nn.Dropout(0.2),
-#         )
-#         self.future_loss = nn.MSELoss()
-#         self.apply(self.init_bert_weights)
-
-#     def init_bert_weights(self, module):
-#         """
-#         Initialize the weights.
-#         """
-#         if isinstance(module, (nn.Linear, nn.Embedding)):
-#             # Slightly different from the TF version
-#             # which uses truncated_normal for initialization
-#             # cf https://github.com/pytorch/pytorch/pull/5617
-#             module.weight.data.normal_(mean=0.0, std=self.cfg.initializer_range)
-#         elif isinstance(module, nn.LayerNorm):
-#             module.bias.data.zero_()
-#             module.weight.data.fill_(1.0)
-#         if isinstance(module, nn.Linear) and module.bias is not None:
-#             module.bias.data.zero_()
-
-#     def forward_step(
-#         self, input_ids, video_features, input_masks, token_type_ids, gt_clip=None
-#     ):
-#         """
-#         single step forward in the recursive structure
-#         """
-#         video_features = self.size_adjust(video_features)
-#         self.future_rec = []
-#         self.future_gt = []
-#         if gt_clip is None:
-#             gt_clip = video_features[:, 1:4, :].clone().cuda()
-#         print(gt_clip.shape)
-#         # preprocess
-#         clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
-#         clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
-
-#         future_b = torch.zeros(video_features[:, 3, :].shape)
-#         future_b = video_features[:, 3, :].clone()
-#         future_b = self.pred_f(future_b)
-#         tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
-#         clip_feats[:, 2, :] = self.z_f * tmp_feat_f + (1 - self.z_f) * future_b
-
-#         # past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
-#         # tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
-#         # past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
-#         # clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
-
-#         # clip_feats = self.ff(clip_feats)
-
-#         # Time Series Module
-#         _, clip_feats = self.TSModule(clip_feats)
-
-#         embeddings = self.embeddings(
-#             input_ids, video_features, token_type_ids
-#         )  # (N, L, D)
-#         # clip_his = torch.zeros((embeddings.shape)).cuda()
-#         # clip_his = clip_his + ts_feats
-#         encoded_layer_outputs = self.encoder(
-#             embeddings, input_masks, output_all_encoded_layers=False
-#         )  # both outputs are list
-#         decoded_layer_outputs = self.transformerdecoder(
-#             encoded_layer_outputs[-1], input_masks, clip_feats
-#         )
-#         prediction_scores = self.decoder(
-#             decoded_layer_outputs[-1]
-#         )  # (N, L, vocab_size)
-#         future_b = self.upsampling(future_b)
-#         return encoded_layer_outputs, prediction_scores, future_b
-#         # return encoded_layer_outputs, prediction_scores
-
-#     # ver. future
-#     def forward(
-#         self,
-#         input_ids_list,
-#         video_features_list,
-#         input_masks_list,
-#         token_type_ids_list,
-#         input_labels_list,
-#         gt_clip=None,
-#     ):
-#         """
-#         Args:
-#             input_ids_list: [(N, L)] * step_size
-#             video_features_list: [(N, L, D_v)] * step_size
-#             input_masks_list: [(N, L)] * step_size with 1 indicates valid bits
-#             token_type_ids_list: [(N, L)] * step_size, with `0` on the first `max_v_len` bits,
-#                 `1` on the last `max_t_len`
-#             input_labels_list: [(N, L)] * step_size, with `-1` on ignored positions,
-#                 will not be used when return_memory is True, thus can be None in this case
-#             return_memory: bool,
-
-#         Returns:
-#         """
-#         # [(N, M, D)] * num_hidden_layers, initialized internally
-#         step_size = len(input_ids_list)
-#         encoded_outputs_list = []  # [(N, L, D)] * step_size
-#         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-#         future_rec = []
-#         future_gt = []
-#         action_score = []
-#         if gt_clip is not None:
-#             for idx in range(step_size):
-#                 encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
-#                     input_ids_list[idx],
-#                     video_features_list[idx],
-#                     input_masks_list[idx],
-#                     token_type_ids_list[idx]
-#                 )
-#                 future_gt.append(gt_clip[idx])
-#                 future_rec.append(pred_future)
-#                 encoded_outputs_list.append(encoded_layer_outputs)
-#                 prediction_scores_list.append(prediction_scores)
-#                 action_score.append(prediction_scores[:, 3, :])
-#         else:
-#             for idx in range(step_size):
-#                 encoded_layer_outputs, prediction_scores = self.forward_step(
-#                     input_ids_list[idx],
-#                     video_features_list[idx],
-#                     input_masks_list[idx],
-#                     token_type_ids_list[idx]
-#                 )
-#                 encoded_outputs_list.append(encoded_layer_outputs)
-#                 prediction_scores_list.append(prediction_scores)
-#                 action_score.append(prediction_scores[:, 3, :])
-#         # compute loss, get predicted words
-#         caption_loss = 0.0
-#         for idx in range(step_size):
-#             snt_loss = self.loss_func(
-#                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
-#                 input_labels_list[idx].view(-1),
-#             )
-#             gt_action_list = input_labels_list[idx][:, 3]
-#             act_score_list = action_score[idx].cpu()
-#             action_loss = 0.0
-#             for actidx in range(len(gt_action_list)):
-#                 gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
-#                 gt_idx = gt_action.tolist()
-#                 if gt_idx[0] == -1:
-#                     continue
-#                 if gt_idx[0] in ACTION_WEIGHT:
-#                     action_loss += (1 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
-#                 else:
-#                     action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
-#             cont_loss = 0.0
-#             tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
-#             tmp_idx_list = input_labels_list[idx].view(-1)
-#             for i in range(1, len(tmp_pred_score_list)):
-#                 cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-#             for i in range(0, len(tmp_pred_score_list) - 1):
-#                 cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
-#             if gt_clip is not None:
-#                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
-
-#             # caption_loss += 0.9 * snt_loss
-#             caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
-#             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
-#         caption_loss /= step_size
-#         return caption_loss, prediction_scores_list
-
 # MART model
 class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
@@ -1214,6 +1143,7 @@ class RecursiveTransformer(nn.Module):
         Returns:
         """
         # [(N, M, D)] * num_hidden_layers, initialized internally
+        # print(input_masks_list)
         step_size = len(input_ids_list)
         decoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
