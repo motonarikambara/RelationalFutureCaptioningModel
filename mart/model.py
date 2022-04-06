@@ -535,11 +535,11 @@ class EncoderWoMemory(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.layer = nn.ModuleList(
-            [LayerWoMemory(cfg) for _ in range(2)]
+            [LayerWoMemory(cfg) for _ in range(cfg.num_hidden_layers)]
         )
-        self.layer_c = nn.ModuleList(
-            [CoAtNetC(cfg) for _ in range(2)]
-        )
+        # self.layer_c = nn.ModuleList(
+        #     [CoAtNetC(cfg) for _ in range(1)]
+        # )
 
 
     def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, clip_feats=None):
@@ -554,10 +554,10 @@ class EncoderWoMemory(nn.Module):
         Returns:
         """
         all_encoder_layers = []
-        for layer_idx, layer_module in enumerate(self.layer_c):
-            hidden_states = layer_module(hidden_states)
-            if output_all_encoded_layers:
-                all_encoder_layers.append(hidden_states)
+        # for layer_idx, layer_module in enumerate(self.layer_c):
+        #     hidden_states = layer_module(hidden_states)
+        #     if output_all_encoded_layers:
+        #         all_encoder_layers.append(hidden_states)
         for layer_idx, layer_module in enumerate(self.layer):
             hidden_states = layer_module(hidden_states, attention_mask, clip_feats)
             if output_all_encoded_layers:
@@ -598,6 +598,9 @@ class Decoder(nn.Module):
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
         )
+        self.layer_c = nn.ModuleList(
+            [CoAtNetC(cfg) for _ in range(num_hidden_layers)]
+        )
 
     def forward(self, hidden_states, attention_mask, clip_his):
         """
@@ -611,6 +614,12 @@ class Decoder(nn.Module):
         query_clip = torch.zeros(hidden_states.shape).cuda()
         query_clip = query_clip + clip_his
         all_decoder_layers = []
+        for layer_idx, layer_module in enumerate(self.layer_c):
+            hidden_states =\
+                layer_module(hidden_states)
+            # hidden_states =\
+            #     layer_module(hidden_states, query_clip)
+            all_decoder_layers.append(hidden_states)
         for layer_idx, layer_module in enumerate(self.layer):
             hidden_states =\
                 layer_module(hidden_states, attention_mask, clip_his)
