@@ -376,6 +376,7 @@ class Attention(nn.Module):
         super().__init__()
         self.self = SelfAttention(cfg)
         self.output = SelfOutput(cfg)
+        # self.ln = nn.LayerNorm(cfg.hidden_size)
 
     def forward(self, x, attention_mask=None, clip_his=None):
         """
@@ -385,8 +386,10 @@ class Attention(nn.Module):
         Returns:
         """
         if clip_his is not None:
+            # self_output = self.ln(x)
             self_output = self.self(clip_his, x, x, attention_mask)
         else:
+            # self_output = self.ln(x)
             self_output = self.self(x, x, x, attention_mask)
         att = self.output(self_output, x)
         return att
@@ -538,7 +541,11 @@ class EncoderWoMemory(nn.Module):
             [LayerWoMemory(cfg) for _ in range(cfg.num_hidden_layers)]
         )
         # self.layer_c = nn.ModuleList(
+<<<<<<< HEAD
         #     [CoAtNetC(cfg) for _ in range(1)]
+=======
+        #     [CoAtNetC(cfg) for _ in range(2)]
+>>>>>>> f14836be0aa22d08099c4422053e1da15b948d7e
         # )
 
 
@@ -637,6 +644,7 @@ class TrmEncLayer(nn.Module):
         self.attention = MultiHeadRSA(cfg)
         # self.attention = Attention(cfg)
         self.output = TrmFeedForward(cfg)
+        self.ln = nn.LayerNorm(cfg.hidden_size)
 
     def forward(self, x):
         """
@@ -646,6 +654,7 @@ class TrmEncLayer(nn.Module):
         """
         tmp_x = x.clone()
         target = x[:, 1, :].clone()
+        target = self.ln(target)
         target = self.attention(target, tmp_x)
         x[:, 1, :] = target.clone()
         # x = self.attention(x)
@@ -694,14 +703,16 @@ class EmbeddingsWithVideo(nn.Module):
             nn.LayerNorm(cfg.word_vec_size, eps=cfg.layer_norm_eps),
             nn.Dropout(cfg.hidden_dropout_prob),
             nn.Linear(cfg.word_vec_size, cfg.hidden_size),
-            nn.ReLU(True),
+            # nn.ReLU(True),
+            nn.GELU(),
             nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
         )
         self.video_embeddings = nn.Sequential(
             nn.LayerNorm(cfg.video_feature_size, eps=cfg.layer_norm_eps),
             # nn.Dropout(cfg.hidden_dropout_prob),
             nn.Linear(cfg.video_feature_size, cfg.hidden_size),
-            nn.ReLU(True),
+            # nn.ReLU(True),
+            nn.GELU(),
             nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps),
         )
 
@@ -835,58 +846,58 @@ class CLIPloss(nn.Module):
         return cliploss
 
 
-class RelationalSelfAttention(nn.Module):
-    """
-    Relational self-attention (RSA)
-    https://arxiv.org/pdf/2111.01673.pdf
-    """
-    def __init__(self, cfg, m=3):
-        super().__init__()
-        self.cfg = cfg
-        self.m = m
-        self.hidden_size = 384
-        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-        self.h =\
-            torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
-        self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
-        self.one = torch.ones((m, 1)).cuda()
-        self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size * 2, self.hidden_size)
-        self.ln = nn.LayerNorm(self.hidden_size)
+# class RelationalSelfAttention(nn.Module):
+#     """
+#     Relational self-attention (RSA)
+#     https://arxiv.org/pdf/2111.01673.pdf
+#     """
+#     def __init__(self, cfg, m=3):
+#         super().__init__()
+#         self.cfg = cfg
+#         self.m = m
+#         self.hidden_size = 384
+#         self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
+#         self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
+#         self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
+#         self.p = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+#         self.h =\
+#             torch.randn((m * self.hidden_size, m), requires_grad=True).cuda()
+#         self.g = torch.randn((m, self.hidden_size), requires_grad=True).cuda()
+#         self.one = torch.ones((m, 1)).cuda()
+#         self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size * 2, self.hidden_size)
+#         self.ln = nn.LayerNorm(self.hidden_size)
 
-    def forward(self, target, cont):
-        query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
-        key = self.key_layer(cont)
-        value = self.value_layer(cont)
+#     def forward(self, target, cont):
+#         query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
+#         key = self.key_layer(cont)
+#         value = self.value_layer(cont)
 
-        # basic kernel
-        kernel_v = torch.matmul(self.p, query).reshape(-1, 1, self.m)
+#         # basic kernel
+#         kernel_v = torch.matmul(self.p, query).reshape(-1, 1, self.m)
 
-        # relational kernel
-        q = torch.matmul(self.one, torch.transpose(query, 1, 2))
-        # q = F.softmax(q)
-        x_q = torch.mul(q, key)
-        x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
-        kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
-        kernel = kernel_v + kernel_r
+#         # relational kernel
+#         q = torch.matmul(self.one, torch.transpose(query, 1, 2))
+#         # q = F.softmax(q)
+#         x_q = torch.mul(q, key)
+#         x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
+#         kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
+#         kernel = kernel_v + kernel_r
 
-        # basic context
-        # basic_cont = context.clone()
+#         # basic context
+#         # basic_cont = context.clone()
 
-        # relational context
-        xg = value.clone()
-        xg = torch.transpose(xg, 1, 2)
-        _xg = torch.matmul(xg, self.g)
-        x_nr = torch.matmul(value, _xg)
-        context = x_nr + value
+#         # relational context
+#         xg = value.clone()
+#         xg = torch.transpose(xg, 1, 2)
+#         _xg = torch.matmul(xg, self.g)
+#         x_nr = torch.matmul(value, _xg)
+#         context = x_nr + value
 
-        output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
+#         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
 
-        # output = self.ln(output)
-        # output = self.ffn(output)
-        return output
+#         # output = self.ln(output)
+#         # output = self.ffn(output)
+#         return output
 
 
 class MultiHeadRSA(nn.Module):
@@ -957,16 +968,19 @@ class FeedforwardNeuralNetModel(nn.Module):
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         # Non-linearity 1
         self.relu1 = nn.ReLU()
+        self.gelu1 = nn.GELU()
 
         # Linear function 2: 100 --> 100
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         # Non-linearity 2
         self.relu2 = nn.ReLU()
+        self.gelu2 = nn.GELU()
 
         # Linear function 3: 100 --> 100
         self.fc3 = nn.Linear(hidden_dim, hidden_dim)
         # Non-linearity 3
         self.relu3 = nn.ReLU()
+        self.gelu3 = nn.GELU()
 
         # Linear function 4 (readout): 100 --> 10
         self.fc4 = nn.Linear(hidden_dim, output_dim)
@@ -975,17 +989,17 @@ class FeedforwardNeuralNetModel(nn.Module):
         # Linear function 1
         out = self.fc1(x)
         # Non-linearity 1
-        out = self.relu1(out)
+        out = self.gelu1(out)
 
         # Linear function 2
         out = self.fc2(out)
         # Non-linearity 2
-        out = self.relu2(out)
+        out = self.gelu2(out)
 
         # Linear function 2
         out = self.fc3(out)
         # Non-linearity 2
-        out = self.relu3(out)
+        out = self.gelu3(out)
 
         # Linear function 4 (readout)
         out = self.fc4(out)
@@ -1053,14 +1067,17 @@ class RecursiveTransformer(nn.Module):
         )
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
-            nn.ReLU(),
+            # nn.ReLU(),
+            nn.GELU(),
             nn.Linear(input_size * 2, input_size),
-            nn.ReLU(),
+            # nn.ReLU(),
+            nn.GELU(),
             nn.Linear(input_size, input_size),
         )
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size),
-            nn.ReLU(),
+            # nn.ReLU(),
+            nn.GELU(),
             nn.Linear(input_size, input_size),
         )
         self.future_loss = nn.MSELoss()
