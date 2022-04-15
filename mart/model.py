@@ -226,6 +226,7 @@ class SelfAttention(nn.Module):
             ) * -10000.0  # (N, 1, Lq, L)
         mixed_query_layer = self.query_w(query)
         mixed_key_layer = self.key_w(key)
+        # print(value.shape)
         mixed_value_layer = self.value_w(value)
         query_layer = self.transpose_for_scores(mixed_query_layer)  # (N, nh, Lq, dh)
         key_layer = self.transpose_for_scores(mixed_key_layer)  # (N, nh, L, dh)
@@ -376,7 +377,7 @@ class Attention(nn.Module):
         super().__init__()
         self.self = SelfAttention(cfg)
         self.output = SelfOutput(cfg)
-        # self.ln = nn.LayerNorm(cfg.hidden_size)
+        self.ln = nn.LayerNorm(cfg.hidden_size)
 
     def forward(self, x, attention_mask=None, clip_his=None):
         """
@@ -386,10 +387,10 @@ class Attention(nn.Module):
         Returns:
         """
         if clip_his is not None:
-            # self_output = self.ln(x)
+            # x = self.ln(x)
             self_output = self.self(clip_his, x, x, attention_mask)
         else:
-            # self_output = self.ln(x)
+            # x = self.ln(x)
             self_output = self.self(x, x, x, attention_mask)
         att = self.output(self_output, x)
         return att

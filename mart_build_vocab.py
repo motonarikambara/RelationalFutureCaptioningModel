@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
+
 import numpy as np
 import torch as th
 from tqdm import tqdm
@@ -129,14 +130,14 @@ def _unused_build_vocab_idx(word_insts: List[List[str]], min_word_count) -> Dict
            "each with minimum occurrence = {}".format(min_word_count)))
     print(("[Info] Ignored word count = {}".format(ignored_word_count)))
 
-    w2ifile = open("annotations/ponnet/mart_word2idx.json", "w")
+    w2ifile = open("annotations/BDD-X/mart_word2idx.json", "w")
     json.dump(word2idx, w2ifile)
     return word2idx
 
 
 if __name__ == "__main__":
     # main()
-    words = json.load(open("annotations/ponnet/trainval_sents.json", "r"))
+    words = json.load(open("annotations/BDD-X/trainval_sents.json", "r"))
     sents = words["sents"]
     _unused_build_vocab_idx(sents, 5)
     main()
