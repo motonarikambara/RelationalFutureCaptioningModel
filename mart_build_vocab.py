@@ -132,6 +132,16 @@ def _unused_build_vocab_idx(word_insts: List[List[str]], min_word_count) -> Dict
 
     w2ifile = open("annotations/BDD-X/mart_word2idx.json", "w")
     json.dump(word2idx, w2ifile)
+
+    # count words
+    word_cnt_limit = {}
+    for k, v in word_count.items():
+        if v >= 50:
+            word_cnt_limit[k] = v
+
+    cnt_file = open("annotations/BDD-X/word_cnt.json", "w")
+    json.dump(word_cnt_limit, cnt_file)
+
     return word2idx
 
 
