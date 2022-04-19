@@ -294,7 +294,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         # disable ema when loading model directly or when decay is 0 / -1
         if self.load_model or cfg.ema_decay <= 0:
             self.ema = None
-        
+
         self.train_steps = 0
         self.val_steps = 0
         self.test_steps = 0
@@ -310,7 +310,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        wandb.init(name="ponnet_ours", project="mart")
+        wandb.init(name="BDD-X_ours", project="RFCM")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
