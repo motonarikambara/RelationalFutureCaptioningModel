@@ -630,6 +630,7 @@ class TrmEncLayer(nn.Module):
         self.attention = MultiHeadRSA(cfg)
         # self.attention = Attention(cfg)
         self.output = TrmFeedForward(cfg)
+        self.ln = nn.LayerNorm(cfg.hidden_size)
 
     def forward(self, x):
         """
@@ -639,6 +640,7 @@ class TrmEncLayer(nn.Module):
         """
         tmp_x = x.clone()
         target = x[:, 1, :].clone()
+        target = self.ln(target)
         target = self.attention(target, tmp_x)
         x[:, 1, :] = target.clone()
         # x = self.attention(x)
@@ -1218,6 +1220,6 @@ class RecursiveTransformer(nn.Module):
             fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
             caption_loss +=\
                 1.0 * snt_loss + 0.1 * fut_loss + cont_loss + 10 * action_loss
-                # 1.0 * snt_loss + 0.01 * fut_loss + 0.005 * (1.0 / cont_loss) + 10 * action_loss
+
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
