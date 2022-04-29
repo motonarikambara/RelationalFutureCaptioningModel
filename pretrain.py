@@ -107,6 +107,7 @@ class RegressionNet(nn.Module):
 
 
     def forward(self, x_list):
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         index = 0
         feature_img_list = []
         for _x in x_list:
@@ -118,6 +119,7 @@ class RegressionNet(nn.Module):
         # (64or16, 4, 256*6)にしたい
         zero_size = 256 * 6 - x.size()[2]
         zeros = torch.zeros(x.size()[0], x.size()[1], zero_size)
+        zeros = zeros.to(device)
         x = torch.cat([x, zeros])
 
         x = self.fc1(x)
@@ -168,18 +170,14 @@ def main():
             for data in tqdm(trainloader):
                 inputs, labels = data
                 input_list = []
-                label_list = []
                 for _inputs in inputs:
                     _inputs = _inputs.to(device)
                     input_list.append(_inputs)
-                for _labels in labels:
-                    _labels = _labels.to(device)
-                    label_list.append(_labels)
                 # inputs = inputs.to(device)
-                # labels = labels.to(device)
+                labels = labels.to(device)
 
                 optimizer.zero_grad()
-                outputs = net(inputs)
+                outputs = net(input_list)
 
                 # vel, acc, crs, crs_velでMSE
                 loss_vel = criterion(outputs[:, 0, :], labels[:, 0, :])
@@ -213,16 +211,12 @@ def main():
             for data in tqdm(validloader):
                 inputs, labels = data
                 input_list = []
-                label_list = []
                 for _inputs in inputs:
                     _inputs = _inputs.to(device)
                     input_list.append(_inputs)
-                for _labels in labels:
-                    _labels = _labels.to(device)
-                    label_list.append(_labels)
                 # inputs = inputs.to(device)
-                # labels = labels.to(device)
-                outputs = net(inputs)
+                labels = labels.to(device)
+                outputs = net(input_list)
 
                 # 出力
                 for index in range(len(outputs[:, 0, :].tolist())):
