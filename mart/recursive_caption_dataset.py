@@ -220,6 +220,7 @@ class RecursiveCaptionDataset(data.Dataset):
         all_feat_n = os.path.join(".", "BDD-X-Dataset", "future_bddx_emb_feats", feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
+            emb_feat = emb_feat.view(-1, 1, 768)
         with open(all_feat_n, "rb") as f:
             all_emb_feat = pickle.load(f)
         return emb_feat, all_emb_feat

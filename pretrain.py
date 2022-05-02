@@ -11,6 +11,7 @@ from torchvision import models
 import torch.nn.functional as F
 from torch import nn
 import copy
+import pickle
 
 
 class MyDataset(torch.utils.data.Dataset):
@@ -62,11 +63,6 @@ class MyDataset(torch.utils.data.Dataset):
                 _img = self.transform(_img)
                 img_trans_list.append(_img)
 
-        # if self.transform is not None:
-        #     img = self.transform(img)
-
-        # img_trans_list = torch.stack(img_trans_list, dtype = torch.float64)
-
         return img_trans_list, self.y[i]
 
 
@@ -89,6 +85,7 @@ class CNNLayer(nn.Module):
         x = F.relu(self.conv5(x))
 
         x = x.view(-1, 4, 256)
+        # x = x.view(-1, 1, 1024)
 
         return x
 
@@ -101,12 +98,20 @@ class RegressionNet(nn.Module):
         layer = CNNLayer()
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(6)])
 
-        self.fc1 = nn.Linear(256 * 6, 512)
-        self.fc2 = nn.Linear(256, 64)
-        self.fc3 = nn.Linear(64, 1)
+        self.fc1 = nn.Linear(256 * 6, 768)
+        self.fc2 = nn.Linear(768, 192)
+        self.fc3 = nn.Linear(192, 64)
+        self.fc4 = nn.Linear(64, 8)
+        self.fc5 = nn.Linear(8, 1)
+
+        # self.fc1 = nn.Linear(1024 * 6, 2048)
+        # self.fc2 = nn.Linear(2048, 512)
+        # self.fc3 = nn.Linear(512, 64)
+        # self.fc4 = nn.Linear(64, 16)
+        # self.fc5 = nn.Linear(16, 4)
 
 
-    def forward(self, x_list):
+    def forward(self, x_list, epoch, data_num):
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         index = 0
         feature_img_list = []
@@ -120,17 +125,28 @@ class RegressionNet(nn.Module):
         zero_size = 256 * 6 - x.size()[2]
         zeros = torch.zeros(x.size()[0], x.size()[1], zero_size)
         zeros = zeros.to(device)
-        x = torch.cat([x, zeros])
+        x = torch.cat([x, zeros], dim=2)
+
+        # # (64or16, 1, 1024*6)にしたい
+        # zero_size = 1024 * 6 - x.size()[2]
+        # zeros = torch.zeros(x.size()[0], x.size()[1], zero_size)
+        # zeros = zeros.to(device)
+        # x = torch.cat([x, zeros], dim=2)
 
         x = self.fc1(x)
         x = self.fc2(x)
+        if epoch == 29 and data_num == 156:
+            with open("./out/img_feature.pkl", mode="wb") as f:
+                pickle.dump(x, f)
         x = self.fc3(x)
+        x = self.fc4(x)
+        x = self.fc5(x)
 
         return x
 
 
 def main():
-    # wandb.init(name="pre-sensor", project="BDD-X")
+    wandb.init(name="pre-sensor", project="BDD-X")
 
     transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
@@ -161,6 +177,8 @@ def main():
 
     valid_out = []
 
+    data_num = 0
+
 
     for epoch in tqdm(range(30)):
         # 学習
@@ -177,7 +195,8 @@ def main():
                 labels = labels.to(device)
 
                 optimizer.zero_grad()
-                outputs = net(input_list)
+                outputs = net(input_list, epoch, data_num)
+                data_num += 1
 
                 # vel, acc, crs, crs_velでMSE
                 loss_vel = criterion(outputs[:, 0, :], labels[:, 0, :])
@@ -196,17 +215,19 @@ def main():
                 running_train_loss += loss.item()
                 loss.backward()
                 optimizer.step()
-                # wandb.log({"loss_vel": loss_vel,
-                #            "loss_acc": loss_acc,
-                #            "loss_crs": loss_crs,
-                #            "loss_crs_vel": loss_crs_vel})
+                wandb.log({"loss_vel": loss_vel,
+                           "loss_acc": loss_acc,
+                           "loss_crs": loss_crs,
+                           "loss_crs_vel": loss_crs_vel})
+            data_num = 0
 
-        # wandb.log({"train_loss": running_train_loss})
+        wandb.log({"train_loss": running_train_loss})
 
         # 検証
         net.eval()
         running_valid_loss = 0.0
         val_vel = val_acc = val_crs = val_crs_vel = 0.0
+
         with torch.set_grad_enabled(False):
             for data in tqdm(validloader):
                 inputs, labels = data
@@ -216,7 +237,7 @@ def main():
                     input_list.append(_inputs)
                 # inputs = inputs.to(device)
                 labels = labels.to(device)
-                outputs = net(input_list)
+                outputs = net(input_list, 0, 0)
 
                 # 出力
                 for index in range(len(outputs[:, 0, :].tolist())):
@@ -244,11 +265,11 @@ def main():
             loss = lam_vel * val_vel + lam_acc * val_acc + lam_crs * val_crs + lam_crs_vel * val_crs_vel
             running_valid_loss += loss
 
-        # wandb.log({"valid_loss": running_valid_loss,
-        #            "valid_vel": val_vel,
-        #            "valid_acc": val_acc,
-        #            "valid_crs": val_crs,
-        #            "valid_crs_vel": val_crs_vel})
+        wandb.log({"valid_loss": running_valid_loss,
+                   "valid_vel": val_vel,
+                   "valid_acc": val_acc,
+                   "valid_crs": val_crs,
+                   "valid_crs_vel": val_crs_vel})
 
         print('#epoch:{}  train loss: {}  valid loss: {}  valid vel: {}  valid acc: {}  valid crs: {}  valid crs vel: {}'.format(epoch,
                                                                                                                     running_train_loss,
@@ -262,8 +283,8 @@ def main():
     # torch.save(net.state_dict(), model_path)
 
     # 辞書オブジェクトをJSONファイルへ出力
-    with open('./out/pretrain_out.json', mode='wt', encoding='utf-8') as file:
-        json.dump(valid_out, file, ensure_ascii=False, indent=None)
+    # with open('./out/pretrain_out.json', mode='wt', encoding='utf-8') as file:
+    #     json.dump(valid_out, file, ensure_ascii=False, indent=None)
 
 
 if __name__ == "__main__":
