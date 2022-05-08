@@ -136,24 +136,16 @@ class RFCMDataset(torch.utils.data.Dataset):
 
         self.idx += 1
         img_path = img_dir + img_name + '.png'
-        print(img_path)
         flag = 0
-        for i in range(len(self.x)):
-            if self.x[i] == img_path:
-                output_y = self.y[i]
-                flag = 1
-                break
-        if flag == 0:
-            en_time -= 1
+        while flag == 0:
             img_num = str(en_time).zfill(4)
             img_name = "frame_" + img_num
             img_path = img_dir + img_name + '.png'
-            print(img_path)
-            for i in range(len(self.x)):
-                if self.x[i] == img_path:
-                    output_y = self.y[i]
+            for index in range(len(self.x)):
+                if self.x[index] == img_path:
+                    output_y = self.y[index]
                     flag = 1
-                    break
+            en_time -= 1
 
         return img_trans_list, output_y, clip_id
 
@@ -254,7 +246,7 @@ class MainNet(nn.Module):
 
 
 def main():
-    # wandb.init(name="pre-sensor", project="BDD-X")
+    wandb.init(name="pre-sensor", project="BDD-X")
 
     transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
@@ -325,7 +317,7 @@ def main():
                 with open("./out/pretrain/test/" + clip_id, + ".pkl", mode="wb") as f:
                     pickle.dump(output, f)
 
-    for epoch in tqdm(range(1)):
+    for epoch in tqdm(range(30)):
         # 学習
         net.train()
         running_train_loss = 0.0
@@ -366,87 +358,88 @@ def main():
 
         wandb.log({"train_loss": running_train_loss})
 
-        # # 検証
-        # net.eval()
-        # running_valid_loss = 0.0
-        # val_vel = val_acc = val_crs = val_crs_vel = 0.0
+        # 検証
+        net.eval()
+        running_valid_loss = 0.0
+        val_vel = val_acc = val_crs = val_crs_vel = 0.0
 
-        # with torch.set_grad_enabled(False):
-        #     for data in tqdm(validloader):
-        #         inputs, labels = data
-        #         input_list = []
-        #         for _inputs in inputs:
-        #             _inputs = _inputs.to(device)
-        #             input_list.append(_inputs)
-        #         # inputs = inputs.to(device)
-        #         labels = labels.to(device)
+        with torch.set_grad_enabled(False):
+            for data in tqdm(validloader):
+                inputs, labels = data
+                input_list = []
+                for _inputs in inputs:
+                    _inputs = _inputs.to(device)
+                    input_list.append(_inputs)
+                # inputs = inputs.to(device)
+                labels = labels.to(device)
 
-        #         outputs = net(input_list)
+                outputs = net(input_list)
 
-        #         # 出力
-        #         for index in range(len(outputs[:, 0, :].tolist())):
-        #             valid_out.append({"o_vel": outputs[:, 0, :].tolist()[index][0],
-        #                             "o_acc": outputs[:, 1, :].tolist()[index][0],
-        #                             "o_crs": outputs[:, 2, :].tolist()[index][0],
-        #                             "o_crs_vel" : outputs[:, 3, :].tolist()[index][0],
-        #                             "l_vel": labels[:, 0, :].tolist()[index][0],
-        #                             "l_acc": labels[:, 1, :].tolist()[index][0],
-        #                             "l_crs": labels[:, 2, :].tolist()[index][0],
-        #                             "l_crs_vel" : labels[:, 3, :].tolist()[index][0],
-        #                             })
+                # 出力
+                for index in range(len(outputs[:, 0, :].tolist())):
+                    valid_out.append({"o_vel": outputs[:, 0, :].tolist()[index][0],
+                                    "o_acc": outputs[:, 1, :].tolist()[index][0],
+                                    "o_crs": outputs[:, 2, :].tolist()[index][0],
+                                    "o_crs_vel" : outputs[:, 3, :].tolist()[index][0],
+                                    "l_vel": labels[:, 0, :].tolist()[index][0],
+                                    "l_acc": labels[:, 1, :].tolist()[index][0],
+                                    "l_crs": labels[:, 2, :].tolist()[index][0],
+                                    "l_crs_vel" : labels[:, 3, :].tolist()[index][0],
+                                    })
 
-        #         # vel, acc, crs, crs_velでMSE
-        #         val_vel += criterion(outputs[:, 0, :], labels[:, 0, :])
-        #         val_acc += criterion(outputs[:, 1, :], labels[:, 1, :])
-        #         val_crs += criterion(outputs[:, 2, :], labels[:, 2, :])
-        #         val_crs_vel += criterion(outputs[:, 3, :], labels[:, 3, :])
+                print(len(validset))
+                # vel, acc, crs, crs_velでMSE
+                val_vel += criterion(outputs[:, 0, :], labels[:, 0, :]) / len(validset)
+                val_acc += criterion(outputs[:, 1, :], labels[:, 1, :]) / len(validset)
+                val_crs += criterion(outputs[:, 2, :], labels[:, 2, :]) / len(validset)
+                val_crs_vel += criterion(outputs[:, 3, :], labels[:, 3, :]) / len(validset)
 
-        #     lam_vel = 1 / 1800
-        #     lam_acc = 1 / 30
-        #     lam_crs = 1 / 500000
-        #     lam_crs_vel = 1 / 25000
+            lam_vel = 1 / 1800
+            lam_acc = 1 / 30
+            lam_crs = 1 / 500000
+            lam_crs_vel = 1 / 25000
 
-        #     loss = lam_vel * val_vel + lam_acc * val_acc + lam_crs * val_crs + lam_crs_vel * val_crs_vel
-        #     running_valid_loss += loss
+            loss = lam_vel * val_vel + lam_acc * val_acc + lam_crs * val_crs + lam_crs_vel * val_crs_vel
+            running_valid_loss += loss
 
-        #     wandb.log({"valid_loss": running_valid_loss,
-        #            "valid_vel": val_vel,
-        #            "valid_acc": val_acc,
-        #            "valid_crs": val_crs,
-        #            "valid_crs_vel": val_crs_vel})
+            wandb.log({"valid_loss": running_valid_loss,
+                   "valid_vel": val_vel,
+                   "valid_acc": val_acc,
+                   "valid_crs": val_crs,
+                   "valid_crs_vel": val_crs_vel})
 
-        # print('#epoch:{}  train loss: {}  valid loss: {}  valid vel: {}  valid acc: {}  valid crs: {}  valid crs vel: {}'.format(epoch,
-        #                                                                                                             running_train_loss,
-        #                                                                                                             running_valid_loss,
-        #                                                                                                             val_vel,
-        #                                                                                                             val_acc,
-        #                                                                                                             val_crs,
-        #                                                                                                             val_crs_vel))
+        print('#epoch:{}  train loss: {}  valid loss: {}  valid vel: {}  valid acc: {}  valid crs: {}  valid crs vel: {}'.format(epoch,
+                                                                                                                    running_train_loss,
+                                                                                                                    running_valid_loss,
+                                                                                                                    val_vel,
+                                                                                                                    val_acc,
+                                                                                                                    val_crs,
+                                                                                                                    val_crs_vel))
 
     # outputs_reg = net.layer(input_list)
     # with open("./out/img_feature.pkl", mode="wb") as f:
     #     pickle.dump(outputs_reg, f)
 
-    with torch.set_grad_enabled(True):
-            for data in tqdm(train_rfcmDataloader):
-                input_list, labels, clip_id = data
-                output = net.layer(input_list)
-                with open("./out/pretrain/train/" + clip_id, + ".pkl", mode="wb") as f:
-                    pickle.dump(output, f)
+    # with torch.set_grad_enabled(True):
+    #         for data in tqdm(train_rfcmDataloader):
+    #             input_list, labels, clip_id = data
+    #             output = net.layer(input_list)
+    #             with open("./out/pretrain/train/" + clip_id, + ".pkl", mode="wb") as f:
+    #                 pickle.dump(output, f)
 
-    with torch.set_grad_enabled(True):
-            for data in tqdm(valid_rfcmDataloader):
-                input_list, labels, clip_id = data
-                output = net.layer(input_list)
-                with open("./out/pretrain/valid/" + clip_id, + ".pkl", mode="wb") as f:
-                    pickle.dump(output, f)
+    # with torch.set_grad_enabled(True):
+    #         for data in tqdm(valid_rfcmDataloader):
+    #             input_list, labels, clip_id = data
+    #             output = net.layer(input_list)
+    #             with open("./out/pretrain/valid/" + clip_id, + ".pkl", mode="wb") as f:
+    #                 pickle.dump(output, f)
 
-    with torch.set_grad_enabled(True):
-            for data in tqdm(test_rfcmDataloader):
-                input_list, labels, clip_id = data
-                output = net.layer(input_list)
-                with open("./out/pretrain/test/" + clip_id, + ".pkl", mode="wb") as f:
-                    pickle.dump(output, f)
+    # with torch.set_grad_enabled(True):
+    #         for data in tqdm(test_rfcmDataloader):
+    #             input_list, labels, clip_id = data
+    #             output = net.layer(input_list)
+    #             with open("./out/pretrain/test/" + clip_id, + ".pkl", mode="wb") as f:
+    #                 pickle.dump(output, f)
 
 
 if __name__ == "__main__":
