@@ -26,6 +26,7 @@ def main_train():
             file_name = row[0].replace('https://s3-us-west-2.amazonaws.com/sq8geewpqu/train/', '')
             file_name = file_name.replace('.mov', "")
             filename_list.append(file_name)
+            video_id += 1
 
     for filename in filename_list:
         json_name = sensor_dir + filename + ".json"
@@ -78,6 +79,7 @@ def main_valid():
             file_name = row[0].replace('https://s3-us-west-2.amazonaws.com/sq8geewpqu/train/', '')
             file_name = file_name.replace('.mov', "")
             filename_list.append(file_name)
+            video_id += 1
 
     for filename in filename_list:
         json_name = sensor_dir + filename + ".json"
