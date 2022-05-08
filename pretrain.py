@@ -111,20 +111,22 @@ class RFCMDataset(torch.utils.data.Dataset):
         load_id = json.load(open_id)
 
         clip_id = json_load[self.idx]["clip_id"]
+        # print(clip_id)
         video_id = int(re.sub('_.*', '', clip_id))
         st_time = clip_id.replace(str(video_id)+"_", "")
         st_time = int(re.sub('_[0-9]*', '', st_time))
         en_time = int(re.sub(str(video_id)+"_[0-9]*_", "", clip_id))
         for k in load_id:
             if k['video_id'] == video_id:
-                clip_id = k['clip_id']
+                _clip_id = k['clip_id']
                 break
-        img_dir = './BDD-X-Dataset/frames/' + clip_id + '/'
+        img_dir = './BDD-X-Dataset/frames/' + _clip_id + '/'
         img_num = str(en_time).zfill(4)
         img_name = "frame_" + img_num
         for index in range(5):
-            img_path = img_dir + str(en_time - index) + ".png"
+            img_path = img_dir + "frame_" + str(en_time - index).zfill(4) + ".png"
             is_file = os.path.isfile(img_path)
+            # print(img_path, is_file)
             if is_file and en_time - index >= st_time:
                 img_post = PIL.Image.open(img_path).convert('RGB')
                 img_list.append(img_post)
@@ -133,6 +135,8 @@ class RFCMDataset(torch.utils.data.Dataset):
             for _img in img_list:
                 _img = self.transform(_img)
                 img_trans_list.append(_img)
+        # print(img_list)
+        # print("trans\n", img_trans_list)
 
         self.idx += 1
         img_path = img_dir + img_name + '.png'
@@ -278,13 +282,13 @@ def main():
     test_id_path = './annotations/BDD-X/bddx_id_test.json'
 
     valid_rfcmDataset = RFCMDataset(valid_data_dir, valid_image_id, valid_id_path, transform)
-    valid_rfcmDataloader = torch.utils.data.DataLoader(valid_rfcmDataset, batch_size=64, shuffle=True)
+    valid_rfcmDataloader = torch.utils.data.DataLoader(valid_rfcmDataset, batch_size=1, shuffle=True)
 
     test_rfcmDataset = RFCMDataset(valid_data_dir, test_image_id, test_id_path, transform)
-    test_rfcmDataloader = torch.utils.data.DataLoader(test_rfcmDataset, batch_size=64, shuffle=True)
+    test_rfcmDataloader = torch.utils.data.DataLoader(test_rfcmDataset, batch_size=1, shuffle=True)
 
     train_rfcmDataset = RFCMDataset(train_data_dir, train_image_id, train_id_path, transform)
-    train_rfcmDataloader = torch.utils.data.DataLoader(train_rfcmDataset, batch_size=64, shuffle=True)
+    train_rfcmDataloader = torch.utils.data.DataLoader(train_rfcmDataset, batch_size=1, shuffle=True)
 
 
     net = MainNet()
@@ -296,26 +300,52 @@ def main():
 
     valid_out = []
 
-    with torch.set_grad_enabled(True):
-            for data in tqdm(train_rfcmDataloader):
-                input_list, labels, clip_id = data
-                output = net.layer(input_list)
-                with open("./out/pretrain/train/" + clip_id, + ".pkl", mode="wb") as f:
-                    pickle.dump(output, f)
+    # with torch.set_grad_enabled(True):
+    #         for data in tqdm(train_rfcmDataloader):
+    #             inputs, labels, clip_id = data
+    #             input_list = []
+    #             for _inputs in inputs:
+    #                 _inputs = _inputs.to(device)
+    #                 input_list.append(_inputs)
+    #             # inputs = inputs.to(device)
+    #             labels = labels.to(device)
+    #             # print(input_list)
+    #             if len(input_list) == 0:
+    #                 continue
+    #             output = net.layer(input_list)
+    #             # print(clip_id)
+    #             with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #                 pickle.dump(output, f)
 
-    with torch.set_grad_enabled(True):
-            for data in tqdm(valid_rfcmDataloader):
-                input_list, labels, clip_id = data
-                output = net.layer(input_list)
-                with open("./out/pretrain/valid/" + clip_id, + ".pkl", mode="wb") as f:
-                    pickle.dump(output, f)
+    # with torch.set_grad_enabled(True):
+    #         for data in tqdm(valid_rfcmDataloader):
+    #             inputs, labels, clip_id = data
+    #             input_list = []
+    #             for _inputs in inputs:
+    #                 _inputs = _inputs.to(device)
+    #                 input_list.append(_inputs)
+    #             # inputs = inputs.to(device)
+    #             if len(input_list) == 0:
+    #                 continue
+    #             labels = labels.to(device)
+    #             output = net.layer(input_list)
+    #             with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #                 pickle.dump(output, f)
 
-    with torch.set_grad_enabled(True):
-            for data in tqdm(test_rfcmDataloader):
-                input_list, labels, clip_id = data
-                output = net.layer(input_list)
-                with open("./out/pretrain/test/" + clip_id, + ".pkl", mode="wb") as f:
-                    pickle.dump(output, f)
+    # with torch.set_grad_enabled(True):
+    #         for data in tqdm(test_rfcmDataloader):
+    #             inputs, labels, clip_id = data
+    #             input_list = []
+    #             for _inputs in inputs:
+    #                 _inputs = _inputs.to(device)
+    #                 input_list.append(_inputs)
+    #             if len(input_list) == 0:
+    #                 continue
+    #             # inputs = inputs.to(device)
+    #             labels = labels.to(device)
+    #             output = net.layer(input_list)
+    #             with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #                 pickle.dump(output, f)
 
     for epoch in tqdm(range(30)):
         # 学習
@@ -387,7 +417,7 @@ def main():
                                     "l_crs_vel" : labels[:, 3, :].tolist()[index][0],
                                     })
 
-                print(len(validset))
+                # print(len(validset))
                 # vel, acc, crs, crs_velでMSE
                 val_vel += criterion(outputs[:, 0, :], labels[:, 0, :]) / len(validset)
                 val_acc += criterion(outputs[:, 1, :], labels[:, 1, :]) / len(validset)
@@ -417,29 +447,52 @@ def main():
                                                                                                                     val_crs_vel))
 
     # outputs_reg = net.layer(input_list)
-    # with open("./out/img_feature.pkl", mode="wb") as f:
-    #     pickle.dump(outputs_reg, f)
+    with torch.set_grad_enabled(True):
+            for data in tqdm(train_rfcmDataloader):
+                inputs, labels, clip_id = data
+                input_list = []
+                for _inputs in inputs:
+                    _inputs = _inputs.to(device)
+                    input_list.append(_inputs)
+                # inputs = inputs.to(device)
+                labels = labels.to(device)
+                # print(input_list)
+                if len(input_list) == 0:
+                    continue
+                output = net.layer(input_list)
+                # print(clip_id)
+                with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
+                    pickle.dump(output, f)
 
-    # with torch.set_grad_enabled(True):
-    #         for data in tqdm(train_rfcmDataloader):
-    #             input_list, labels, clip_id = data
-    #             output = net.layer(input_list)
-    #             with open("./out/pretrain/train/" + clip_id, + ".pkl", mode="wb") as f:
-    #                 pickle.dump(output, f)
+    with torch.set_grad_enabled(True):
+            for data in tqdm(valid_rfcmDataloader):
+                inputs, labels, clip_id = data
+                input_list = []
+                for _inputs in inputs:
+                    _inputs = _inputs.to(device)
+                    input_list.append(_inputs)
+                # inputs = inputs.to(device)
+                if len(input_list) == 0:
+                    continue
+                labels = labels.to(device)
+                output = net.layer(input_list)
+                with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
+                    pickle.dump(output, f)
 
-    # with torch.set_grad_enabled(True):
-    #         for data in tqdm(valid_rfcmDataloader):
-    #             input_list, labels, clip_id = data
-    #             output = net.layer(input_list)
-    #             with open("./out/pretrain/valid/" + clip_id, + ".pkl", mode="wb") as f:
-    #                 pickle.dump(output, f)
-
-    # with torch.set_grad_enabled(True):
-    #         for data in tqdm(test_rfcmDataloader):
-    #             input_list, labels, clip_id = data
-    #             output = net.layer(input_list)
-    #             with open("./out/pretrain/test/" + clip_id, + ".pkl", mode="wb") as f:
-    #                 pickle.dump(output, f)
+    with torch.set_grad_enabled(True):
+            for data in tqdm(test_rfcmDataloader):
+                inputs, labels, clip_id = data
+                input_list = []
+                for _inputs in inputs:
+                    _inputs = _inputs.to(device)
+                    input_list.append(_inputs)
+                if len(input_list) == 0:
+                    continue
+                # inputs = inputs.to(device)
+                labels = labels.to(device)
+                output = net.layer(input_list)
+                with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
+                    pickle.dump(output, f)
 
 
 if __name__ == "__main__":
