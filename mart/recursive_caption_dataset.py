@@ -216,13 +216,14 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         # 動画に関する特徴量を取得
         feat_file = raw_name + ".pkl"
-        file_n = os.path.join(".", "BDD-X-Dataset", "bdd_emb_feats", feat_file)
-        all_feat_n = os.path.join(".", "BDD-X-Dataset", "future_bddx_emb_feats", feat_file)
+        file_n = os.path.join(".", "out", "pretrain", "train", feat_file)
+        all_feat_n = os.path.join(".", "out", "pretrain", "future_train", feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
             emb_feat = emb_feat.view(-1, 1, 768)
         with open(all_feat_n, "rb") as f:
             all_emb_feat = pickle.load(f)
+            all_emb_feat = all_emb_feat.view(-1, 1, 768)
         return emb_feat, all_emb_feat
 
     def convert_example_to_features(self, example):

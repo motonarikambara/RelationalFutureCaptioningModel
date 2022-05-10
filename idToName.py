@@ -21,6 +21,7 @@ def main_train():
                 video_id += 1
                 continue
             if row[0] == "":
+                video_id += 1
                 continue
             file_name = row[0].replace('https://s3-us-west-2.amazonaws.com/sq8geewpqu/train/', '')
             file_name = file_name.replace('.mov', "")
@@ -54,6 +55,7 @@ def main_valid():
                 video_id += 1
                 continue
             if row[0] == "":
+                video_id += 1
                 continue
             file_name = row[0].replace('https://s3-us-west-2.amazonaws.com/sq8geewpqu/train/', '')
             file_name = file_name.replace('.mov', "")
@@ -87,6 +89,7 @@ def main_test():
                 video_id += 1
                 continue
             if row[0] == "":
+                video_id += 1
                 continue
             file_name = row[0].replace('https://s3-us-west-2.amazonaws.com/sq8geewpqu/train/', '')
             file_name = file_name.replace('.mov', "")
