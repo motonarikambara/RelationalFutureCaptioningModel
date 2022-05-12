@@ -141,11 +141,11 @@ class RecursiveCaptionDataset(data.Dataset):
         # determine metadata file
         tmp_path = "BDD-X"
         if mode == "train":  # 1333 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_train.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
         elif mode == "val":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_val.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
         elif mode == "test":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_test.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
             mode = "val"
             self.mode = "val"
         else:

@@ -39,13 +39,17 @@ class MyDataset(torch.utils.data.Dataset):
             y_temp = []
             x.append(v["img_path"])
             y_temp.append((float(v["speed"]) - speed_mean) / speed_std)
-            y_temp.append((float(v["accelerater"]) - acc_mean) / acc_std)
-            y_temp.append((float(v["course"]) - crs_mean) / crs_std)
-            y_temp.append((float(v["course_vel"]) - crs_vel_mean) / crs_vel_std)
+            # y_temp.append((float(v["accelerater"]) - acc_mean) / acc_std)
+            # y_temp.append((float(v["course"]) - crs_mean) / crs_std)
+            # y_temp.append((float(v["course_vel"]) - crs_vel_mean) / crs_vel_std)
+            # y_temp.append(0.0)
+            # y_temp.append(0.0)
+            # y_temp.append(0.0)
             y.append(y_temp)
 
         self.x = x
-        self.y = torch.from_numpy(np.array(y)).float().view(-1, 4, 1)
+        # self.y = torch.from_numpy(np.array(y)).float().view(-1, 4, 1)
+        self.y = torch.from_numpy(np.array(y)).float().view(-1, 1, 1)
 
         self.transform = transform
 
@@ -79,95 +83,6 @@ class MyDataset(torch.utils.data.Dataset):
         return img_trans_list, self.y[i]
 
 
-class RFCMDataset(torch.utils.data.Dataset):
-
-    def __init__(self, label_path, img_id, id_path, transform=None):
-        x = []
-        y = []
-        json_open = open(label_path, 'r')
-        json_load = json.load(json_open)
-
-        for v in json_load:
-            y_temp = []
-            x.append(v["img_path"])
-            y_temp.append(float(v["speed"]))
-            y_temp.append(float(v["accelerater"]))
-            y_temp.append(float(v["course"]))
-            y_temp.append(float(v["course_vel"]))
-            y.append(y_temp)
-
-        self.x = x
-        self.y = torch.from_numpy(np.array(y)).float().view(-1, 4, 1)
-
-        self.transform = transform
-
-        self.idx = 0
-
-        self.img_id = img_id
-        self.id_path = id_path
-
-
-    def __len__(self):
-        return len(self.x)
-
-
-    def __getitem__(self, i):
-        img_list = []
-        img_trans_list = []
-
-        json_open = open(self.img_id, 'r')
-        json_load = json.load(json_open)
-
-        open_id = open(self.id_path, 'r')
-        load_id = json.load(open_id)
-
-        clip_id = json_load[self.idx]["clip_id"]
-        # print(clip_id)
-        video_id = int(re.sub('_.*', '', clip_id))
-        st_time = clip_id.replace(str(video_id)+"_", "")
-        st_time = int(re.sub('_[0-9]*', '', st_time))
-        en_time = int(re.sub(str(video_id)+"_[0-9]*_", "", clip_id))
-        for k in load_id:
-            if k['video_id'] == video_id:
-                _clip_id = k['clip_id']
-                break
-        img_dir = './BDD-X-Dataset/frames/' + _clip_id + '/'
-        img_num = str(en_time).zfill(4)
-        img_name = "frame_" + img_num
-        for index in range(5):
-            img_path = img_dir + "frame_" + str(en_time - index).zfill(4) + ".png"
-            is_file = os.path.isfile(img_path)
-            # print(img_path, is_file)
-            if is_file and en_time - index >= st_time:
-                img_post = PIL.Image.open(img_path).convert('RGB')
-                img_list.append(img_post)
-
-        if self.transform is not None:
-            for _img in img_list:
-                _img = self.transform(_img)
-                img_trans_list.append(_img)
-        # print(img_list)
-        # print("trans\n", img_trans_list)
-
-        self.idx += 1
-        img_path = img_dir + img_name + '.png'
-        flag = 0
-        while flag == 0:
-            img_num = str(en_time).zfill(4)
-            img_name = "frame_" + img_num
-            img_path = img_dir + img_name + '.png'
-            for index in range(len(self.x)):
-                if self.x[index] == img_path:
-                    output_y = self.y[index]
-                    flag = 1
-            en_time -= 1
-            if en_time < 0:
-                output_y = torch.zeros(1, 4)
-                break
-
-        return img_trans_list, output_y, clip_id
-
-
 class CNNLayer(nn.Module):
     def __init__(self):
         super(CNNLayer, self).__init__()
@@ -186,8 +101,8 @@ class CNNLayer(nn.Module):
         x = F.relu(self.conv4(x))
         x = F.relu(self.conv5(x))
 
-        x = x.view(-1, 4, 256)
-        # x = x.view(-1, 1, 1024)
+        # x = x.view(-1, 4, 256)
+        x = x.view(-1, 1, 1024)
 
         return x
 
@@ -200,17 +115,18 @@ class RegressionNet(nn.Module):
         layer = CNNLayer()
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(6)])
 
-        self.fc1 = nn.Linear(256 * 6, 768)
-        self.fc2 = nn.Linear(768, 192)
-        self.fc3 = nn.Linear(192, 64)
+        # self.fc1 = nn.Linear(256 * 6, 768)
+        # self.fc2 = nn.Linear(768, 192)
+        # self.fc3 = nn.Linear(192, 64)
         # self.fc4 = nn.Linear(64, 8)
         # self.fc5 = nn.Linear(8, 1)
 
-        # self.fc1 = nn.Linear(1024 * 6, 2048)
-        # self.fc2 = nn.Linear(2048, 512)
-        # self.fc3 = nn.Linear(512, 64)
+        self.fc1 = nn.Linear(1024 * 6, 2048)
+        self.fc2 = nn.Linear(2048, 512)
+        self.fc3 = nn.Linear(512, 64)
         # self.fc4 = nn.Linear(64, 16)
         # self.fc5 = nn.Linear(16, 4)
+        # self.fc5 = nn.Linear(4, 1)
 
 
     def forward(self, x_list):
@@ -224,7 +140,7 @@ class RegressionNet(nn.Module):
         x = torch.cat(feature_img_list, dim=2)
 
         # (64or16, 4, 256*6)にしたい
-        zero_size = 256 * 6 - x.size()[2]
+        zero_size = 1024 * 6 - x.size()[2]
         zeros = torch.zeros(x.size()[0], x.size()[1], zero_size)
         zeros = zeros.to(device)
         x = torch.cat([x, zeros], dim=2)
@@ -235,9 +151,9 @@ class RegressionNet(nn.Module):
         # zeros = zeros.to(device)
         # x = torch.cat([x, zeros], dim=2)
 
-        x = self.fc1(x)
-        x = self.fc2(x)
-        x = self.fc3(x)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
 
         # x = self.fc4(x)
         # x = self.fc5(x)
@@ -257,8 +173,8 @@ class MainNet(nn.Module):
 
     def forward(self, x_list):
         x = self.layer(x_list)
-        x = self.fc4(x)
-        x = self.fc5(x)
+        x = F.relu(self.fc4(x))
+        x = F.relu(self.fc5(x))
 
         return x
 
@@ -296,14 +212,14 @@ def main():
     test_image_id = './annotations/BDD-X/captioning_test.json'
     test_id_path = './annotations/BDD-X/bddx_id_test.json'
 
-    valid_rfcmDataset = RFCMDataset(valid_data_dir, valid_image_id, valid_id_path, transform)
-    valid_rfcmDataloader = torch.utils.data.DataLoader(valid_rfcmDataset, batch_size=1, shuffle=True)
+    # valid_rfcmDataset = RFCMDataset(valid_data_dir, valid_image_id, valid_id_path, transform)
+    # valid_rfcmDataloader = torch.utils.data.DataLoader(valid_rfcmDataset, batch_size=1, shuffle=True)
 
-    test_rfcmDataset = RFCMDataset(test_data_dir, test_image_id, test_id_path, transform)
-    test_rfcmDataloader = torch.utils.data.DataLoader(test_rfcmDataset, batch_size=1, shuffle=True)
+    # test_rfcmDataset = RFCMDataset(test_data_dir, test_image_id, test_id_path, transform)
+    # test_rfcmDataloader = torch.utils.data.DataLoader(test_rfcmDataset, batch_size=1, shuffle=True)
 
-    train_rfcmDataset = RFCMDataset(train_data_dir, train_image_id, train_id_path, transform)
-    train_rfcmDataloader = torch.utils.data.DataLoader(train_rfcmDataset, batch_size=1, shuffle=True)
+    # train_rfcmDataset = RFCMDataset(train_data_dir, train_image_id, train_id_path, transform)
+    # train_rfcmDataloader = torch.utils.data.DataLoader(train_rfcmDataset, batch_size=1, shuffle=True)
 
 
     net = MainNet()
@@ -334,16 +250,17 @@ def main():
 
                 # vel, acc, crs, crs_velでMSE
                 loss_vel = criterion(outputs[:, 0, :], labels[:, 0, :])
-                loss_acc = criterion(outputs[:, 1, :], labels[:, 1, :])
-                loss_crs = criterion(outputs[:, 2, :], labels[:, 2, :])
-                loss_crs_vel = criterion(outputs[:, 3, :], labels[:, 3, :])
+                # loss_acc = criterion(outputs[:, 1, :], labels[:, 1, :])
+                # loss_crs = criterion(outputs[:, 2, :], labels[:, 2, :])
+                # loss_crs_vel = criterion(outputs[:, 3, :], labels[:, 3, :])
 
                 # lam_vel = 1 / 120
                 # lam_acc = 1 / 4
                 # lam_crs = 1 / 50000
                 # lam_crs_vel = 1 / 6000
 
-                loss = loss_vel + loss_acc + loss_crs + loss_crs_vel
+                # loss = loss_vel + loss_acc + loss_crs + loss_crs_vel
+                loss = loss_vel
 
                 # loss = lam_vel * loss_vel + lam_acc * loss_acc + lam_crs * loss_crs + lam_crs_vel * loss_crs_vel
 
@@ -351,10 +268,11 @@ def main():
                 running_train_loss += loss.item()
                 loss.backward()
                 optimizer.step()
-                wandb.log({"tloss_vel": loss_vel,
-                           "tloss_acc": loss_acc,
-                           "tloss_crs": loss_crs,
-                           "tloss_crs_vel": loss_crs_vel})
+                # wandb.log({"tloss_vel": loss_vel,
+                #            "tloss_acc": loss_acc,
+                #            "tloss_crs": loss_crs,
+                #            "tloss_crs_vel": loss_crs_vel})
+                wandb.log({"tloss_vel": loss_vel})
 
         wandb.log({"train_loss": running_train_loss})
 
@@ -377,38 +295,36 @@ def main():
 
                 # 出力
                 for index in range(len(outputs[:, 0, :].tolist())):
+                    # valid_out.append({"o_vel": outputs[:, 0, :].tolist()[index][0],
+                    #                 "o_acc": outputs[:, 1, :].tolist()[index][0],
+                    #                 "o_crs": outputs[:, 2, :].tolist()[index][0],
+                    #                 "o_crs_vel" : outputs[:, 3, :].tolist()[index][0],
+                    #                 "l_vel": labels[:, 0, :].tolist()[index][0],
+                    #                 "l_acc": labels[:, 1, :].tolist()[index][0],
+                    #                 "l_crs": labels[:, 2, :].tolist()[index][0],
+                    #                 "l_crs_vel" : labels[:, 3, :].tolist()[index][0],
+                    #                 })
                     valid_out.append({"o_vel": outputs[:, 0, :].tolist()[index][0],
-                                    "o_acc": outputs[:, 1, :].tolist()[index][0],
-                                    "o_crs": outputs[:, 2, :].tolist()[index][0],
-                                    "o_crs_vel" : outputs[:, 3, :].tolist()[index][0],
                                     "l_vel": labels[:, 0, :].tolist()[index][0],
-                                    "l_acc": labels[:, 1, :].tolist()[index][0],
-                                    "l_crs": labels[:, 2, :].tolist()[index][0],
-                                    "l_crs_vel" : labels[:, 3, :].tolist()[index][0],
                                     })
 
-                # print(len(validset))
                 # vel, acc, crs, crs_velでMSE
                 val_vel += criterion(outputs[:, 0, :], labels[:, 0, :]) / len(validset)
-                val_acc += criterion(outputs[:, 1, :], labels[:, 1, :]) / len(validset)
-                val_crs += criterion(outputs[:, 2, :], labels[:, 2, :]) / len(validset)
-                val_crs_vel += criterion(outputs[:, 3, :], labels[:, 3, :]) / len(validset)
+                # val_acc += criterion(outputs[:, 1, :], labels[:, 1, :]) / len(validset)
+                # val_crs += criterion(outputs[:, 2, :], labels[:, 2, :]) / len(validset)
+                # val_crs_vel += criterion(outputs[:, 3, :], labels[:, 3, :]) / len(validset)
 
-            # lam_vel = 1 / 1800
-            # lam_acc = 1 / 30
-            # lam_crs = 1 / 500000
-            # lam_crs_vel = 1 / 25000
-
-            # loss = lam_vel * val_vel + lam_acc * val_acc + lam_crs * val_crs + lam_crs_vel * val_crs_vel
-
-            loss = loss_vel + loss_acc + loss_crs + loss_crs_vel
+            # loss = loss_vel + loss_acc + loss_crs + loss_crs_vel
+            loss = loss_vel
             running_valid_loss += loss
 
+            # wandb.log({"valid_loss": running_valid_loss,
+            #        "valid_vel": val_vel,
+            #        "valid_acc": val_acc,
+            #        "valid_crs": val_crs,
+            #        "valid_crs_vel": val_crs_vel})
             wandb.log({"valid_loss": running_valid_loss,
-                   "valid_vel": val_vel,
-                   "valid_acc": val_acc,
-                   "valid_crs": val_crs,
-                   "valid_crs_vel": val_crs_vel})
+                   "valid_vel": val_vel,})
 
         print('#epoch:{}  train loss: {}  valid loss: {}  valid vel: {}  valid acc: {}  valid crs: {}  valid crs vel: {}'.format(epoch,
                                                                                                                     running_train_loss,
@@ -417,63 +333,13 @@ def main():
                                                                                                                     val_acc,
                                                                                                                     val_crs,
                                                                                                                     val_crs_vel))
+        print('#epoch:{}  train loss: {}  valid loss: {}  valid vel: {}'.format(epoch,
+                                                                        running_train_loss,
+                                                                        running_valid_loss,
+                                                                        val_vel,))
 
 
     # outputs_reg = net.layer(input_list)
-
-
-    with torch.set_grad_enabled(True):
-        for data in tqdm(train_rfcmDataloader):
-            inputs, labels, clip_id = data
-            input_list = []
-            for _inputs in inputs:
-                _inputs = _inputs.to(device)
-                input_list.append(_inputs)
-            # inputs = inputs.to(device)
-            labels = labels.to(device)
-            # print(input_list)
-            if len(input_list) == 0:
-                continue
-            output = net.layer(input_list)
-            # print(clip_id)
-            with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
-                pickle.dump(output, f)
-            if clip_id[0] == '10192_30_32':
-                break
-
-    with torch.set_grad_enabled(True):
-        for data in tqdm(valid_rfcmDataloader):
-            inputs, labels, clip_id = data
-            input_list = []
-            for _inputs in inputs:
-                _inputs = _inputs.to(device)
-                input_list.append(_inputs)
-            # inputs = inputs.to(device)
-            if len(input_list) == 0:
-                continue
-            labels = labels.to(device)
-            output = net.layer(input_list)
-            with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
-                pickle.dump(output, f)
-            if clip_id[0] == '11594_23_25':
-                break
-
-    with torch.set_grad_enabled(True):
-        for data in tqdm(test_rfcmDataloader):
-            inputs, labels, clip_id = data
-            input_list = []
-            for _inputs in inputs:
-                _inputs = _inputs.to(device)
-                input_list.append(_inputs)
-            if len(input_list) == 0:
-                continue
-            # inputs = inputs.to(device)
-            labels = labels.to(device)
-            output = net.layer(input_list)
-            with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
-                pickle.dump(output, f)
-            if clip_id[0] == '12994_0_38':
-                break
 
 
 if __name__ == "__main__":

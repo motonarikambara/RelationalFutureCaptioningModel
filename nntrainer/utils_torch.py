@@ -47,6 +47,7 @@ def create_shared_array(arr: np.ndarray, dtype: str = "float") -> np.array:
     shape = arr.shape
     flat_shape = int(np.prod(np.array(shape)))
     c_type = MAP_TYPES[dtype]
+    multiprocessing.set_start_method('spawn', force=True)
     shared_array_base = multiprocessing.Array(c_type, flat_shape)
     shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
     shared_array = shared_array.reshape(shape)
