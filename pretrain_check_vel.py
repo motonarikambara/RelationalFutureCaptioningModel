@@ -315,7 +315,7 @@ def main():
                 # val_crs_vel += criterion(outputs[:, 3, :], labels[:, 3, :]) / len(validset)
 
             # loss = loss_vel + loss_acc + loss_crs + loss_crs_vel
-            loss = loss_vel
+            loss = val_vel
             running_valid_loss += loss
 
             # wandb.log({"valid_loss": running_valid_loss,

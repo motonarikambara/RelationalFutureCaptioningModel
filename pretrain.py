@@ -16,7 +16,7 @@ import pickle
 import re
 
 
-class MyDataset(torch.utils.data.Dataset):
+class MyTrainDataset(torch.utils.data.Dataset):
 
     def __init__(self, label_path, transform=None):
         x = []
@@ -42,6 +42,69 @@ class MyDataset(torch.utils.data.Dataset):
             y_temp.append((float(v["accelerater"]) - acc_mean) / acc_std)
             y_temp.append((float(v["course"]) - crs_mean) / crs_std)
             y_temp.append((float(v["course_vel"]) - crs_vel_mean) / crs_vel_std)
+            y.append(y_temp)
+
+        self.x = x
+        self.y = torch.from_numpy(np.array(y)).float().view(-1, 4, 1)
+
+        self.transform = transform
+
+
+    def __len__(self):
+        return len(self.x)
+
+
+    def __getitem__(self, i):
+        img = PIL.Image.open(self.x[i]).convert('RGB')
+
+        img_dir = os.path.dirname(self.x[i])
+        img_num = os.path.splitext(os.path.basename(self.x[i]))[0]
+        img_num = img_num.replace('frame_', '')
+        img_num = int(img_num)
+        img_list = []
+        img_list.append(img)
+        img_trans_list = []
+        for index in range(5):
+            img_path = img_dir + "frame_" + str(img_num - index - 1) + ".png"
+            is_file = os.path.isfile(img_path)
+            if is_file:
+                img_post = PIL.Image.open(img_path).convert('RGB')
+                img_list.append(img_post)
+
+        if self.transform is not None:
+            for _img in img_list:
+                _img = self.transform(_img)
+                img_trans_list.append(_img)
+
+        return img_trans_list, self.y[i]
+
+
+class MyValidDataset(torch.utils.data.Dataset):
+
+    def __init__(self, label_path, transform=None):
+        x = []
+        y = []
+        json_open = open(label_path, 'r')
+        json_load = json.load(json_open)
+
+
+        speed_std = 6.943259466752163
+        acc_std = 1.0128755278649304
+        crs_std = 105.43048660106768
+        crs_vel_std = 23.557576723588763
+        speed_mean = 6.592310560518758
+        acc_mean = -0.032466484184198605
+        crs_mean = 179.07880361238463
+        crs_vel_mean = 0.09007327456722607
+
+
+        for v in json_load:
+            y_temp = []
+            x.append(v["img_path"])
+            y_temp.append(float(v["speed"]))
+            y_temp.append(float(v["accelerater"]))
+            y_temp.append(float(v["course"]))
+            y_temp.append(float(v["course_vel"]))
             y.append(y_temp)
 
         self.x = x
@@ -202,7 +265,7 @@ class RegressionNet(nn.Module):
 
         self.fc1 = nn.Linear(256 * 6, 768)
         self.fc2 = nn.Linear(768, 192)
-        self.fc3 = nn.Linear(192, 64)
+        # self.fc3 = nn.Linear(192, 64)
         # self.fc4 = nn.Linear(64, 8)
         # self.fc5 = nn.Linear(8, 1)
 
@@ -237,7 +300,7 @@ class RegressionNet(nn.Module):
 
         x = self.fc1(x)
         x = self.fc2(x)
-        x = self.fc3(x)
+        # x = self.fc3(x)
 
         # x = self.fc4(x)
         # x = self.fc5(x)
@@ -251,12 +314,17 @@ class MainNet(nn.Module):
 
         self.layer = RegressionNet()
 
+        # self.fc2 = nn.Linear(768, 192)
+        self.fc3 = nn.Linear(192, 64)
+
         self.fc4 = nn.Linear(64, 8)
         self.fc5 = nn.Linear(8, 1)
 
 
     def forward(self, x_list):
         x = self.layer(x_list)
+        # x = self.fc2(x)
+        x = self.fc3(x)
         x = self.fc4(x)
         x = self.fc5(x)
 
@@ -277,12 +345,12 @@ def main():
     valid_data_dir = './annotations/BDD-X/bddx_sensor_valid.json'
     test_data_dir = './annotations/BDD-X/bddx_sensor_test.json'
 
-    trainset = MyDataset(train_data_dir, transform=transform)
+    trainset = MyTrainDataset(train_data_dir, transform=transform)
     trainset.x = trainset.x[:10000]
     trainset.y = trainset.y[:10000]
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True)
 
-    validset = MyDataset(valid_data_dir, transform=transform)
+    validset = MyValidDataset(valid_data_dir, transform=transform)
     validset.x = validset.x[:2000]
     validset.y = validset.y[:2000]
     validloader = torch.utils.data.DataLoader(validset, batch_size=64, shuffle=False)
@@ -401,7 +469,7 @@ def main():
 
             # loss = lam_vel * val_vel + lam_acc * val_acc + lam_crs * val_crs + lam_crs_vel * val_crs_vel
 
-            loss = loss_vel + loss_acc + loss_crs + loss_crs_vel
+            loss = val_vel + val_acc + val_crs + val_crs_vel
             running_valid_loss += loss
 
             wandb.log({"valid_loss": running_valid_loss,
@@ -421,6 +489,9 @@ def main():
 
     # outputs_reg = net.layer(input_list)
 
+    with open('./out/pretrain_out.json', mode='wt', encoding='utf-8') as file:
+        json.dump(valid_out, file, ensure_ascii=False, indent=None)
+
 
     with torch.set_grad_enabled(True):
         for data in tqdm(train_rfcmDataloader):
@@ -435,6 +506,7 @@ def main():
             if len(input_list) == 0:
                 continue
             output = net.layer(input_list)
+            # print(output.shape)
             # print(clip_id)
             with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(output, f)
@@ -453,6 +525,7 @@ def main():
                 continue
             labels = labels.to(device)
             output = net.layer(input_list)
+            # print(output.shape)
             with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(output, f)
             if clip_id[0] == '11594_23_25':
@@ -470,6 +543,7 @@ def main():
             # inputs = inputs.to(device)
             labels = labels.to(device)
             output = net.layer(input_list)
+            # print(output.shape)
             with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(output, f)
             if clip_id[0] == '12994_0_38':
