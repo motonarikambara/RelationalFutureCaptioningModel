@@ -981,10 +981,14 @@ class RecursiveTransformer(nn.Module):
 
             # sensor loss
             sens_loss = 0.0
-            v_loss = self.vloss(sense_pre_list[idx][0], (gt_sens[idx][0]- speed_mean) / speed_std)
-            va_loss = self.valoss(sense_pre_list[idx][1], (gt_sens[idx][1]- acc_mean) / acc_std)
-            c_loss = self.closs(sense_pre_list[idx][2], (gt_sens[idx][2] - crs_mean) / crs_std)
-            cv_loss = self.cvloss(sense_pre_list[idx][3], (gt_sens[idx][3] - crs_vel_mean) / crs_vel_std)
+            sense_pre_list[idx] = sense_pre_list[idx].view(-1, 4, 1)
+            gt_sens[idx] = gt_sens[idx].view(-1, 4, 1)
+            # print(sense_pre_list[idx].shape)
+            # print(gt_sens[idx].shape)
+            v_loss = self.vloss(sense_pre_list[idx][:, 0, :], (gt_sens[idx][:, 0, :]- speed_mean) / speed_std)
+            va_loss = self.valoss(sense_pre_list[idx][:, 1, :], (gt_sens[idx][:, 1, :]- acc_mean) / acc_std)
+            c_loss = self.closs(sense_pre_list[idx][:, 2, :], (gt_sens[idx][:, 2, :] - crs_mean) / crs_std)
+            cv_loss = self.cvloss(sense_pre_list[idx][:, 3, :], (gt_sens[idx][:, 3, :] - crs_vel_mean) / crs_vel_std)
             sens_loss += v_loss + va_loss + c_loss + cv_loss
             # for actidx in range(len(gt_action_list)):
             #     gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
