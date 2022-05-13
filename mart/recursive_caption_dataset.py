@@ -140,12 +140,16 @@ class RecursiveCaptionDataset(data.Dataset):
 
         # determine metadata file
         tmp_path = "BDD-X"
+        self.exe_mode = -1
         if mode == "train":  # 1333 videos
             data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
+            self.exe_mode = 0
         elif mode == "val":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_valid.json"
+            self.exe_mode = 1
         elif mode == "test":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_test.json"
+            self.exe_mode = 2
             mode = "val"
             self.mode = "val"
         else:
@@ -216,16 +220,23 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         # 動画に関する特徴量を取得
         feat_file = raw_name + ".pkl"
-        file_n = os.path.join(".", "out", "pretrain", "train", feat_file)
-        all_feat_n = os.path.join(".", "out", "pretrain", "future_train", feat_file)
+        exe_mode_list = ["train", "valid", "test"]
+        file_n = os.path.join(".", "out", "pretrain", exe_mode_list[self.exe_mode], feat_file)
+        all_feat_n = os.path.join(".", "out", "pretrain", "future_" + exe_mode_list[self.exe_mode], feat_file)
+        sense_file = os.path.join(".", "out", "pretrain", exe_mode_list[self.exe_mode] + "_labels", feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
-            print(emb_feat.shape)
+            # print(emb_feat.shape)
             emb_feat = emb_feat.view(-1, 1, 768)
         with open(all_feat_n, "rb") as f:
             all_emb_feat = pickle.load(f)
             all_emb_feat = all_emb_feat.view(-1, 1, 768)
-        return emb_feat, all_emb_feat
+
+        #  KOKODESENSAMOMOTTEKURU
+        with open(sense_file, "rb") as f:
+            senses = pickle.load(f)
+
+        return emb_feat, all_emb_feat, senses
 
     def convert_example_to_features(self, example):
         """
@@ -244,11 +255,12 @@ class RecursiveCaptionDataset(data.Dataset):
         # raw_name: clip_id
         raw_name = example["clip_id"]
         # ver. future
-        emb_feat, all_emb_feat = self._load_ponnet_video_feature(
+        emb_feat, all_emb_feat, senses = self._load_ponnet_video_feature(
             raw_name
         )
         video_feature = emb_feat
-        gt_feat = all_emb_feat
+        gt_feat = all_emb_feat.cpu().data.numpy()
+        senses = senses.cpu().data.numpy()
         single_video_features = []
         single_video_meta = []
         # cur_data:video特徴量を含むdict
@@ -256,7 +268,8 @@ class RecursiveCaptionDataset(data.Dataset):
             example["clip_id"],
             example["sentence"],
             video_feature,
-            gt_feat
+            gt_feat,
+            senses
         )
         # single_video_features: video特徴量を含むdict
         single_video_features.append(cur_data)
@@ -268,7 +281,8 @@ class RecursiveCaptionDataset(data.Dataset):
         name,
         sentence,
         video_feature,
-        gt_feat
+        gt_feat,
+        sens
     ):
         """
         make features for a single clip-sentence pair.
@@ -314,7 +328,8 @@ class RecursiveCaptionDataset(data.Dataset):
             input_mask=np.array(input_mask).astype(np.float32),
             token_type_ids=np.array(token_type_ids).astype(np.int64),
             video_feature=feat.astype(np.float32),
-            gt_clip = gt_feat.astype(np.float32)
+            gt_clip = gt_feat.astype(np.float32),
+            gt_sens = sens.astype(np.float32)
         )
         meta = dict(name=name, sentence=sentence)
         return coll_data, meta
@@ -327,7 +342,8 @@ class RecursiveCaptionDataset(data.Dataset):
         # only clip (1, 384)
         valid_l = 0
         feat = np.zeros((max_v_l, self.coot_dim_clip))
-        feat[valid_l] = clip_feat
+        # print(feat.shape)
+        feat[valid_l] = clip_feat.cpu().data.numpy()
         valid_l += 1
         return feat, valid_l
 

@@ -438,6 +438,28 @@ class DecoderLayer(nn.Module):
         layer_output = self.output(att, att)  # (N, L, D)
         return layer_output
 
+class SenseLayer(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.attention = Attention(cfg)
+        self.output = TrmFeedForward(cfg)
+
+    def forward(self, x, clip_his):
+        """
+        Args:
+            prev_m: (N, M, D)
+            hidden_states: (N, L, D)
+            attention_mask: (N, L)
+        Returns:
+        """
+        shifted_self_mask = None
+        max_v_len, max_t_len = self.cfg.max_v_len, self.cfg.max_t_len
+        # self-attention, need to shift right
+        att = self.attention(x, shifted_self_mask, clip_his)
+        layer_output = self.output(att, att)  # (N, L, D)
+        return layer_output
+
 
 class Decoder(nn.Module):
     def __init__(self, cfg, num_hidden_layers=5):
@@ -464,6 +486,31 @@ class Decoder(nn.Module):
             #     layer_module(hidden_states, query_clip)
             all_decoder_layers.append(hidden_states)
         return all_decoder_layers
+
+
+class SensorTransformer(nn.Module):
+    def __init__(self, cfg, num_hidden_layers=3):
+        super().__init__()
+        self.layer = nn.ModuleList(
+            [SenseLayer(cfg) for _ in range(num_hidden_layers)]
+        )
+
+    def forward(self, hidden_states, attention_mask=None):
+        """
+        Args:
+            hidden_states: (N, L, D)
+            attention_mask: (N, L)
+            output_all_encoded_layers:
+        Returns:
+        """
+        pred_sens = []
+        for layer_idx, layer_module in enumerate(self.layer):
+            hidden_states =\
+                layer_module(hidden_states, hidden_states)
+            # hidden_states =\
+            #     layer_module(hidden_states, query_clip)
+            pred_sens.append(hidden_states)
+        return pred_sens[-1] # (batch_size, 4, 384)
 
 
 class TrmEncLayer(nn.Module):
@@ -728,20 +775,25 @@ class RecursiveTransformer(nn.Module):
             if self.cfg.share_wd_cls_weight
             else None
         )
+        self.senstrm = SensorTransformer(cfg)
         self.decoder = LMPredictionHead(cfg, decoder_classifier_weight)
         self.transformerdecoder = Decoder(cfg)
-        if self.cfg.label_smoothing != 0:
-            self.loss_func = LabelSmoothingLoss(
-                cfg.label_smoothing, cfg.vocab_size, ignore_index=-1
-            )
-        else:
-            self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        # if self.cfg.label_smoothing != 0:
+        #     self.loss_func = LabelSmoothingLoss(
+        #         cfg.label_smoothing, cfg.vocab_size, ignore_index=-1
+        #     )
+        # else:
+        self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.actionloss_func = nn.CrossEntropyLoss()
+        self.vloss = nn.MSELoss()
+        self.valoss = nn.MSELoss()
+        self.closs = nn.MSELoss()
+        self.cvloss = nn.MSELoss()
         # clipの特徴量の次元
         input_size = 384
-        self.size_adjust = nn.Linear(512, 384)
-        self.upsampling = nn.Linear(384, 512)
+        self.size_adjust = nn.Linear(768, 384)
+        self.upsampling = nn.Linear(384, 768)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
@@ -755,6 +807,19 @@ class RecursiveTransformer(nn.Module):
             nn.ReLU(),
             nn.Linear(input_size, input_size),
             nn.Dropout(0.2),
+        )
+
+        self.sens_pre_mod = nn.Sequential(
+            nn.Linear(768, 128),
+            nn.ReLU(),
+            nn.LayerNorm(128, eps=cfg.layer_norm_eps),
+            nn.Linear(128, 32),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(32, 8),
+            nn.ReLU(),
+            nn.LayerNorm(8, eps=cfg.layer_norm_eps),
+            nn.Linear(8, 1)
         )
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
@@ -803,7 +868,7 @@ class RecursiveTransformer(nn.Module):
         # clip_feats = self.ff(clip_feats)
 
         # Time Series Module
-        _, clip_feats = self.TSModule(clip_feats)
+        all_clip_feats, clip_feats = self.TSModule(clip_feats)
 
         embeddings = self.embeddings(
             input_ids, video_features, token_type_ids
@@ -816,11 +881,21 @@ class RecursiveTransformer(nn.Module):
         decoded_layer_outputs = self.transformerdecoder(
             encoded_layer_outputs[-1], input_masks, clip_feats
         )
+        # Sensor Predictor
+        all_clip_feats = torch.cat((all_clip_feats, clip_feats), dim=1)
+        sense_pre = self.senstrm(all_clip_feats)
+        # print(sense_pre.shape)
+        # decoded_feat = torch.cat((decoded_layer_outputs[-1], sense_pre), dim=1) # (-1, 29? , 384)
+        decoded_feat = decoded_layer_outputs[-1]
+        decoded_feat[:,24:28, :] = sense_pre
+        # print(sense_pre.shape)
+        sense_pre = self.sens_pre_mod(sense_pre)
+
         prediction_scores = self.decoder(
-            decoded_layer_outputs[-1]
+            decoded_feat
         )  # (N, L, vocab_size)
         future_b = self.upsampling(future_b)
-        return encoded_layer_outputs, prediction_scores, future_b
+        return encoded_layer_outputs, prediction_scores, future_b, sense_pre.reshape((-1, 4))
         # return encoded_layer_outputs, prediction_scores
 
     # ver. future
@@ -832,6 +907,7 @@ class RecursiveTransformer(nn.Module):
         token_type_ids_list,
         input_labels_list,
         gt_clip=None,
+        gt_sens=None
     ):
         """
         Args:
@@ -852,9 +928,10 @@ class RecursiveTransformer(nn.Module):
         future_rec = []
         future_gt = []
         action_score = []
+        sense_pre_list = []
         if gt_clip is not None:
             for idx in range(step_size):
-                encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+                encoded_layer_outputs, prediction_scores, pred_future, sense_pre = self.forward_step(
                     input_ids_list[idx],
                     video_features_list[idx],
                     input_masks_list[idx],
@@ -865,9 +942,10 @@ class RecursiveTransformer(nn.Module):
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
                 action_score.append(prediction_scores[:, 3, :])
+                sense_pre_list.append(sense_pre)
         else:
             for idx in range(step_size):
-                encoded_layer_outputs, prediction_scores = self.forward_step(
+                encoded_layer_outputs, prediction_scores, sense_pre = self.forward_step(
                     input_ids_list[idx],
                     video_features_list[idx],
                     input_masks_list[idx],
@@ -876,9 +954,11 @@ class RecursiveTransformer(nn.Module):
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
                 action_score.append(prediction_scores[:, 3, :])
+                sense_pre_list.append(sense_pre)
         # compute loss, get predicted words
         caption_loss = 0.0
         for idx in range(step_size):
+            # print(prediction_scores_list[idx].shape)
             snt_loss = self.loss_func(
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
@@ -886,6 +966,26 @@ class RecursiveTransformer(nn.Module):
             gt_action_list = input_labels_list[idx][:, 3]
             act_score_list = action_score[idx].cpu()
             action_loss = 0.0
+
+            # vel, acc, crs, crs_velでMSE
+            speed_std = 6.943259466752163
+            acc_std = 1.0128755278649304
+            crs_std = 105.43048660106768
+            # crs_vel_std = 23.557576723588763
+            speed_mean = 6.592310560518758
+            acc_mean = -0.032466484184198605
+            crs_mean = 179.07880361238463
+            # crs_vel_mean = 0.09007327456722607
+            crs_vel_mean = 0.10629827308128925
+            crs_vel_std = 7.364545291989854
+
+            # sensor loss
+            sens_loss = 0.0
+            v_loss = self.vloss(sense_pre_list[idx][0], (gt_sens[idx][0]- speed_mean) / speed_std)
+            va_loss = self.valoss(sense_pre_list[idx][1], (gt_sens[idx][1]- acc_mean) / acc_std)
+            c_loss = self.closs(sense_pre_list[idx][2], (gt_sens[idx][2] - crs_mean) / crs_std)
+            cv_loss = self.cvloss(sense_pre_list[idx][3], (gt_sens[idx][3] - crs_vel_mean) / crs_vel_std)
+            sens_loss += v_loss + va_loss + c_loss + cv_loss
             # for actidx in range(len(gt_action_list)):
             #     gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
             #     gt_idx = gt_action.tolist()
@@ -898,14 +998,14 @@ class RecursiveTransformer(nn.Module):
             cont_loss = 0.0
             tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             tmp_idx_list = input_labels_list[idx].view(-1)
-            for i in range(1, len(tmp_pred_score_list)):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-            for i in range(0, len(tmp_pred_score_list) - 1):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            # for i in range(1, len(tmp_pred_score_list)):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            # for i in range(0, len(tmp_pred_score_list) - 1):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
 
-            # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
+            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + sens_loss
 
         caption_loss /= step_size
         return caption_loss, prediction_scores_list

@@ -1,13 +1,14 @@
 import json
 import csv
 import os
+import math
 
 def main_train():
     print('********** JSONファイルを書き出す **********')
 
     json_list = []
     input_data = './BDD-X-Dataset/BDD-X-Annotations_v1.csv'
-    output_file = './annotations/BDD-X/bddx_sensor_train.json'
+    output_file = './annotations/BDD-X/bddx_sensor_train_tri.json'
     sensor_dir = './BDD-X-Dataset/train/info/'
 
     # CSV ファイルの読み込み
@@ -46,15 +47,7 @@ def main_train():
                 speed_post = speed
                 course_post = course
             accel = speed - speed_post
-            course_vel = course - course_post
-            if -270 < course_vel and  course_vel <= -90:
-                course_vel = -90
-            elif course_vel <= -270:
-                course_vel += 360
-            elif 90 <= course_vel and  course_vel < 270:
-                course_vel = 90
-            elif 270 <= course_vel:
-                course_vel -= 360
+            course_vel = math.sin(math.radians(course)) - math.sin(math.radians(course_post))
             speed_post = speed
             course_post = course
             json_list.append({'img_path':img_path, 'speed':speed, 'course':course, 'accelerater':accel, 'course_vel':course_vel})
@@ -69,7 +62,7 @@ def main_valid():
 
     json_list = []
     input_data = './BDD-X-Dataset/BDD-X-Annotations_v1.csv'
-    output_file = './annotations/BDD-X/bddx_sensor_valid.json'
+    output_file = './annotations/BDD-X/bddx_sensor_valid_tri.json'
     sensor_dir = './BDD-X-Dataset/train/info/'
 
     # CSV ファイルの読み込み
@@ -108,15 +101,7 @@ def main_valid():
                 speed_post = speed
                 course_post = course
             accel = speed - speed_post
-            course_vel = course - course_post
-            if -270 < course_vel and  course_vel <= -90:
-                course_vel = -90
-            elif course_vel <= -270:
-                course_vel += 360
-            elif 90 <= course_vel and  course_vel < 270:
-                course_vel = 90
-            elif 270 <= course_vel:
-                course_vel -= 360
+            course_vel = math.sin(math.radians(course)) - math.sin(math.radians(course_post))
             speed_post = speed
             course_post = course
             json_list.append({'img_path':img_path, 'speed':speed, 'course':course, 'accelerater':accel, 'course_vel':course_vel})
@@ -131,7 +116,7 @@ def main_test():
 
     json_list = []
     input_data = './BDD-X-Dataset/BDD-X-Annotations_v1.csv'
-    output_file = './annotations/BDD-X/bddx_sensor_test.json'
+    output_file = './annotations/BDD-X/bddx_sensor_test_tri.json'
     sensor_dir = './BDD-X-Dataset/train/info/'
 
     # CSV ファイルの読み込み
@@ -170,15 +155,7 @@ def main_test():
                 speed_post = speed
                 course_post = course
             accel = speed - speed_post
-            course_vel = course - course_post
-            if -270 < course_vel and  course_vel <= -90:
-                course_vel = -90
-            elif course_vel <= -270:
-                course_vel += 360
-            elif 90 <= course_vel and  course_vel < 270:
-                course_vel = 90
-            elif 270 <= course_vel:
-                course_vel -= 360
+            course_vel = math.sin(math.radians(course)) - math.sin(math.radians(course_post))
             speed_post = speed
             course_post = course
             json_list.append({'img_path':img_path, 'speed':speed, 'course':course, 'accelerater':accel, 'course_vel':course_vel})

@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import statistics as st
 
 def main():
     input_file = './annotations/BDD-X/bddx_sensor_train.json'
@@ -27,6 +28,7 @@ def main():
     print('accelerater :', acc_std)
     print('crs :', crs_std)
     print('crs_vel :', crs_vel_std)
+    print(st.mean(crs_vel_list))
 
 
 if __name__ == '__main__':

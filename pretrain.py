@@ -16,86 +16,13 @@ import pickle
 import re
 
 
-class MyTrainDataset(torch.utils.data.Dataset):
+class MyDataset(torch.utils.data.Dataset):
 
     def __init__(self, label_path, transform=None):
         x = []
         y = []
         json_open = open(label_path, 'r')
         json_load = json.load(json_open)
-
-
-        speed_std = 6.943259466752163
-        acc_std = 1.0128755278649304
-        crs_std = 105.43048660106768
-        crs_vel_std = 23.557576723588763
-        speed_mean = 6.592310560518758
-        acc_mean = -0.032466484184198605
-        crs_mean = 179.07880361238463
-        crs_vel_mean = 0.09007327456722607
-
-
-        for v in json_load:
-            y_temp = []
-            x.append(v["img_path"])
-            y_temp.append((float(v["speed"]) - speed_mean) / speed_std)
-            y_temp.append((float(v["accelerater"]) - acc_mean) / acc_std)
-            y_temp.append((float(v["course"]) - crs_mean) / crs_std)
-            y_temp.append((float(v["course_vel"]) - crs_vel_mean) / crs_vel_std)
-            y.append(y_temp)
-
-        self.x = x
-        self.y = torch.from_numpy(np.array(y)).float().view(-1, 4, 1)
-
-        self.transform = transform
-
-
-    def __len__(self):
-        return len(self.x)
-
-
-    def __getitem__(self, i):
-        img = PIL.Image.open(self.x[i]).convert('RGB')
-
-        img_dir = os.path.dirname(self.x[i])
-        img_num = os.path.splitext(os.path.basename(self.x[i]))[0]
-        img_num = img_num.replace('frame_', '')
-        img_num = int(img_num)
-        img_list = []
-        img_list.append(img)
-        img_trans_list = []
-        for index in range(5):
-            img_path = img_dir + "frame_" + str(img_num - index - 1) + ".png"
-            is_file = os.path.isfile(img_path)
-            if is_file:
-                img_post = PIL.Image.open(img_path).convert('RGB')
-                img_list.append(img_post)
-
-        if self.transform is not None:
-            for _img in img_list:
-                _img = self.transform(_img)
-                img_trans_list.append(_img)
-
-        return img_trans_list, self.y[i]
-
-
-class MyValidDataset(torch.utils.data.Dataset):
-
-    def __init__(self, label_path, transform=None):
-        x = []
-        y = []
-        json_open = open(label_path, 'r')
-        json_load = json.load(json_open)
-
-
-        speed_std = 6.943259466752163
-        acc_std = 1.0128755278649304
-        crs_std = 105.43048660106768
-        crs_vel_std = 23.557576723588763
-        speed_mean = 6.592310560518758
-        acc_mean = -0.032466484184198605
-        crs_mean = 179.07880361238463
-        crs_vel_mean = 0.09007327456722607
 
 
         for v in json_load:
@@ -140,6 +67,69 @@ class MyValidDataset(torch.utils.data.Dataset):
                 img_trans_list.append(_img)
 
         return img_trans_list, self.y[i]
+
+
+# class MyValidDataset(torch.utils.data.Dataset):
+
+#     def __init__(self, label_path, transform=None):
+#         x = []
+#         y = []
+#         json_open = open(label_path, 'r')
+#         json_load = json.load(json_open)
+
+
+#         speed_std = 6.943259466752163
+#         acc_std = 1.0128755278649304
+#         crs_std = 105.43048660106768
+#         crs_vel_std = 23.557576723588763
+#         speed_mean = 6.592310560518758
+#         acc_mean = -0.032466484184198605
+#         crs_mean = 179.07880361238463
+#         crs_vel_mean = 0.09007327456722607
+
+
+#         for v in json_load:
+#             y_temp = []
+#             x.append(v["img_path"])
+#             y_temp.append(float(v["speed"]))
+#             y_temp.append(float(v["accelerater"]))
+#             y_temp.append(float(v["course"]))
+#             y_temp.append(float(v["course_vel"]))
+#             y.append(y_temp)
+
+#         self.x = x
+#         self.y = torch.from_numpy(np.array(y)).float().view(-1, 4, 1)
+
+#         self.transform = transform
+
+
+#     def __len__(self):
+#         return len(self.x)
+
+
+#     def __getitem__(self, i):
+#         img = PIL.Image.open(self.x[i]).convert('RGB')
+
+#         img_dir = os.path.dirname(self.x[i])
+#         img_num = os.path.splitext(os.path.basename(self.x[i]))[0]
+#         img_num = img_num.replace('frame_', '')
+#         img_num = int(img_num)
+#         img_list = []
+#         img_list.append(img)
+#         img_trans_list = []
+#         for index in range(5):
+#             img_path = img_dir + "frame_" + str(img_num - index - 1) + ".png"
+#             is_file = os.path.isfile(img_path)
+#             if is_file:
+#                 img_post = PIL.Image.open(img_path).convert('RGB')
+#                 img_list.append(img_post)
+
+#         if self.transform is not None:
+#             for _img in img_list:
+#                 _img = self.transform(_img)
+#                 img_trans_list.append(_img)
+
+#         return img_trans_list, self.y[i]
 
 
 class RFCMDataset(torch.utils.data.Dataset):
@@ -298,8 +288,8 @@ class RegressionNet(nn.Module):
         # zeros = zeros.to(device)
         # x = torch.cat([x, zeros], dim=2)
 
-        x = self.fc1(x)
-        x = self.fc2(x)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
         # x = self.fc3(x)
 
         # x = self.fc4(x)
@@ -324,8 +314,8 @@ class MainNet(nn.Module):
     def forward(self, x_list):
         x = self.layer(x_list)
         # x = self.fc2(x)
-        x = self.fc3(x)
-        x = self.fc4(x)
+        x = F.relu(self.fc3(x))
+        x = F.relu(self.fc4(x))
         x = self.fc5(x)
 
         return x
@@ -345,12 +335,12 @@ def main():
     valid_data_dir = './annotations/BDD-X/bddx_sensor_valid.json'
     test_data_dir = './annotations/BDD-X/bddx_sensor_test.json'
 
-    trainset = MyTrainDataset(train_data_dir, transform=transform)
+    trainset = MyDataset(train_data_dir, transform=transform)
     trainset.x = trainset.x[:10000]
     trainset.y = trainset.y[:10000]
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True)
 
-    validset = MyValidDataset(valid_data_dir, transform=transform)
+    validset = MyDataset(valid_data_dir, transform=transform)
     validset.x = validset.x[:2000]
     validset.y = validset.y[:2000]
     validloader = torch.utils.data.DataLoader(validset, batch_size=64, shuffle=False)
@@ -383,6 +373,65 @@ def main():
 
     valid_out = []
 
+    # with torch.set_grad_enabled(True):
+    #     for data in tqdm(train_rfcmDataloader):
+    #         inputs, labels, clip_id = data
+    #         input_list = []
+    #         for _inputs in inputs:
+    #             _inputs = _inputs.to(device)
+    #             input_list.append(_inputs)
+    #         # inputs = inputs.to(device)
+    #         labels = labels.to(device)
+    #         # print(input_list)
+    #         if len(input_list) == 0:
+    #             continue
+    #         output = net.layer(input_list)
+    #         # print(clip_id)
+    #         with open("./out/pretrain/train_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #             pickle.dump(labels, f)
+    #         with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #             pickle.dump(output, f)
+    #         if clip_id[0] == '10192_30_32':
+    #             break
+
+    # with torch.set_grad_enabled(True):
+    #     for data in tqdm(valid_rfcmDataloader):
+    #         inputs, labels, clip_id = data
+    #         input_list = []
+    #         for _inputs in inputs:
+    #             _inputs = _inputs.to(device)
+    #             input_list.append(_inputs)
+    #         # inputs = inputs.to(device)
+    #         if len(input_list) == 0:
+    #             continue
+    #         labels = labels.to(device)
+    #         output = net.layer(input_list)
+    #         with open("./out/pretrain/valid_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #             pickle.dump(labels, f)
+    #         with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #             pickle.dump(output, f)
+    #         if clip_id[0] == '11594_23_25':
+    #             break
+
+    # with torch.set_grad_enabled(True):
+    #     for data in tqdm(test_rfcmDataloader):
+    #         inputs, labels, clip_id = data
+    #         input_list = []
+    #         for _inputs in inputs:
+    #             _inputs = _inputs.to(device)
+    #             input_list.append(_inputs)
+    #         if len(input_list) == 0:
+    #             continue
+    #         # inputs = inputs.to(device)
+    #         labels = labels.to(device)
+    #         output = net.layer(input_list)
+    #         with open("./out/pretrain/test_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #             pickle.dump(labels, f)
+    #         with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
+    #             pickle.dump(output, f)
+    #         if clip_id[0] == '12994_0_38':
+    #             break
+
     for epoch in tqdm(range(30)):
         # 学習
         net.train()
@@ -401,10 +450,21 @@ def main():
                 outputs = net(input_list)
 
                 # vel, acc, crs, crs_velでMSE
-                loss_vel = criterion(outputs[:, 0, :], labels[:, 0, :])
-                loss_acc = criterion(outputs[:, 1, :], labels[:, 1, :])
-                loss_crs = criterion(outputs[:, 2, :], labels[:, 2, :])
-                loss_crs_vel = criterion(outputs[:, 3, :], labels[:, 3, :])
+                speed_std = 6.943259466752163
+                acc_std = 1.0128755278649304
+                crs_std = 105.43048660106768
+                # crs_vel_std = 23.557576723588763
+                speed_mean = 6.592310560518758
+                acc_mean = -0.032466484184198605
+                crs_mean = 179.07880361238463
+                # crs_vel_mean = 0.09007327456722607
+                crs_vel_mean = 0.10629827308128925
+                crs_vel_std = 7.364545291989854
+
+                loss_vel = criterion(outputs[:, 0, :], (labels[:, 0, :] - speed_mean) / speed_std)
+                loss_acc = criterion(outputs[:, 1, :], (labels[:, 1, :] - acc_mean) / acc_std)
+                loss_crs = criterion(outputs[:, 2, :], (labels[:, 2, :] - crs_mean) / crs_std)
+                loss_crs_vel = criterion(outputs[:, 3, :], (labels[:, 3, :] - crs_vel_mean) / crs_vel_std)
 
                 # lam_vel = 1 / 120
                 # lam_acc = 1 / 4
@@ -444,11 +504,22 @@ def main():
                 outputs = net(input_list)
 
                 # 出力
+                speed_std = 6.943259466752163
+                acc_std = 1.0128755278649304
+                crs_std = 105.43048660106768
+                # crs_vel_std = 23.557576723588763
+                speed_mean = 6.592310560518758
+                acc_mean = -0.032466484184198605
+                crs_mean = 179.07880361238463
+                # crs_vel_mean = 0.09007327456722607
+                crs_vel_mean = 0.10629827308128925
+                crs_vel_std = 7.364545291989854
+
                 for index in range(len(outputs[:, 0, :].tolist())):
-                    valid_out.append({"o_vel": outputs[:, 0, :].tolist()[index][0],
-                                    "o_acc": outputs[:, 1, :].tolist()[index][0],
-                                    "o_crs": outputs[:, 2, :].tolist()[index][0],
-                                    "o_crs_vel" : outputs[:, 3, :].tolist()[index][0],
+                    valid_out.append({"o_vel": outputs[:, 0, :].tolist()[index][0] * speed_std + speed_mean,
+                                    "o_acc": outputs[:, 1, :].tolist()[index][0] * acc_std + acc_mean,
+                                    "o_crs": outputs[:, 2, :].tolist()[index][0] * crs_std + crs_mean,
+                                    "o_crs_vel" : outputs[:, 3, :].tolist()[index][0] * crs_vel_std + crs_vel_mean,
                                     "l_vel": labels[:, 0, :].tolist()[index][0],
                                     "l_acc": labels[:, 1, :].tolist()[index][0],
                                     "l_crs": labels[:, 2, :].tolist()[index][0],
@@ -457,10 +528,10 @@ def main():
 
                 # print(len(validset))
                 # vel, acc, crs, crs_velでMSE
-                val_vel += criterion(outputs[:, 0, :], labels[:, 0, :]) / len(validset)
-                val_acc += criterion(outputs[:, 1, :], labels[:, 1, :]) / len(validset)
-                val_crs += criterion(outputs[:, 2, :], labels[:, 2, :]) / len(validset)
-                val_crs_vel += criterion(outputs[:, 3, :], labels[:, 3, :]) / len(validset)
+                val_vel += criterion(outputs[:, 0, :] * speed_std + speed_mean, labels[:, 0, :]) / len(validset)
+                val_acc += criterion(outputs[:, 1, :] * acc_std + acc_mean, labels[:, 1, :]) / len(validset)
+                val_crs += criterion(outputs[:, 2, :] * crs_std + crs_mean, labels[:, 2, :]) / len(validset)
+                val_crs_vel += criterion(outputs[:, 3, :] * crs_vel_std + crs_vel_mean, labels[:, 3, :]) / len(validset)
 
             # lam_vel = 1 / 1800
             # lam_acc = 1 / 30
@@ -508,6 +579,8 @@ def main():
             output = net.layer(input_list)
             # print(output.shape)
             # print(clip_id)
+            with open("./out/pretrain/train_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(labels, f)
             with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(output, f)
             if clip_id[0] == '10192_30_32':
@@ -526,6 +599,8 @@ def main():
             labels = labels.to(device)
             output = net.layer(input_list)
             # print(output.shape)
+            with open("./out/pretrain/valid_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(labels, f)
             with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(output, f)
             if clip_id[0] == '11594_23_25':
@@ -544,6 +619,8 @@ def main():
             labels = labels.to(device)
             output = net.layer(input_list)
             # print(output.shape)
+            with open("./out/pretrain/test_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(labels, f)
             with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(output, f)
             if clip_id[0] == '12994_0_38':
