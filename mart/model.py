@@ -1,6 +1,5 @@
 """
 MART model.
-
 """
 import copy
 import logging
@@ -44,7 +43,6 @@ def create_mart_model(
         vocab_size: Vocabulary, calculated in mart as len(train_set.word2idx).
         cache_dir: Cache directory.
         verbose: Print model name and number of parameters.
-
     Returns:
         MART model.
     """
@@ -135,47 +133,6 @@ class PositionEncoding(nn.Module):
         return x
 
 
-class LayerNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-12):
-        """
-        Construct a layernorm module in the TF style
-        (epsilon inside the square root).
-        """
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.bias = nn.Parameter(torch.zeros(hidden_size))
-        self.variance_epsilon = eps
-
-    def forward(self, x):
-        u = x.mean(-1, keepdim=True)
-        s = (x - u).pow(2).mean(-1, keepdim=True)
-        x = (x - u) / torch.sqrt(s + self.variance_epsilon)
-        return self.weight * x + self.bias
-
-
-class CoAtNetC(nn.Module):
-    def __init__(self, cfg):
-        super().__init__()
-        input_size = cfg.hidden_size
-        self.f_c = nn.Sequential(
-            nn.Conv2d(input_size, input_size * 4, 1),
-            nn.Conv2d(input_size * 4, input_size * 4, 3, padding=1, groups=input_size * 4),
-            nn.Conv2d(input_size * 4, input_size, 1)
-        )
-    def forward(self, hidden_states):
-        batch_size = hidden_states.size(0)
-        dim = hidden_states.size(1)
-        size = hidden_states.size(2)
-        hidden_states = torch.reshape(hidden_states, (batch_size, 5, 5, size))
-        hidden_states = hidden_states.permute(0, 3, 1, 2)
-        hidden_states = self.f_c(hidden_states)
-        hidden_states = hidden_states.permute(0, 2, 3, 1)
-        hidden_states = torch.reshape(hidden_states, (batch_size, dim, size))
-
-        return hidden_states
-
-
-
 class SelfAttention(nn.Module):
     """
     Attentionの計算
@@ -197,7 +154,6 @@ class SelfAttention(nn.Module):
         self.value_w = nn.Linear(cfg.hidden_size, self.all_head_size)
 
         self.dropout = nn.Dropout(cfg.attention_probs_dropout_prob)
-        # self.conv_attention = ConvAttention(cfg)
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (
@@ -214,7 +170,6 @@ class SelfAttention(nn.Module):
             key_states: (N, L, D)
             value_states: (N, L, D)
             attention_mask: (N, Lq, L)
-
         Returns:
         """
         # only need to mask the dimension where the softmax
@@ -230,7 +185,6 @@ class SelfAttention(nn.Module):
         query_layer = self.transpose_for_scores(mixed_query_layer)  # (N, nh, Lq, dh)
         key_layer = self.transpose_for_scores(mixed_key_layer)  # (N, nh, L, dh)
         value_layer = self.transpose_for_scores(mixed_value_layer)  # (N, nh, L, dh)
-        # depthwise_layer = self.conv_attention(query, value)
         # Take the dot product between "query" and "key"
         # to get the raw attention scores.
         att_w = torch.matmul(query_layer, key_layer.transpose(-1, -2))  # (N, nh, Lq, L)
@@ -245,104 +199,6 @@ class SelfAttention(nn.Module):
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
         context_layer = torch.matmul(attention_probs, value_layer)
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        context_layer = context_layer.view(*new_context_layer_shape)
-        return context_layer # + depthwise_layer
-
-
-class ConvAttention(nn.Module):
-    def __init__(self,cfg):
-        super().__init__()
-        if cfg.hidden_size % cfg.num_attention_heads != 0:
-            raise ValueError(
-                "The hidden size (%d) is not a multiple of the number of attention "
-                "heads (%d)" % (cfg.hidden_size, cfg.num_attention_heads)
-            )
-        self.num_attention_heads = cfg.num_attention_heads
-        self.attention_head_size = int(cfg.hidden_size / cfg.num_attention_heads)
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-
-        self.query_w = nn.Linear(cfg.hidden_size, self.all_head_size)
-        self.value_w = nn.Linear(cfg.hidden_size, self.all_head_size)
-
-        dim = 768
-        self.depthwise_conv = nn.Conv2d(dim, dim, 3, groups=dim, padding=1)
-
-    def forward(self, query, value):
-        query_layer = self.query_w(query)
-        value_layer = self.value_w(value)
-        dim_v = int(value_layer.size(1))
-        batch_size = value_layer.size(0)
-        dim_v_sep = dim_v // 5
-        size_v = int(value_layer.size(2))
-        value_layer = torch.reshape(value_layer, (batch_size, dim_v_sep, dim_v_sep, size_v))
-        value_layer = self.depthwise_conv(value_layer.permute(0, 3, 1, 2))
-        value_layer = torch.reshape(value_layer.permute(0, 2, 3, 1), (batch_size, dim_v, size_v))
-        dp_w = torch.mul(query_layer, value_layer)
-
-        return dp_w
-
-
-class LambdaAttention(nn.Module):
-    """
-    Attentionの計算
-    """
-
-    def __init__(self, cfg):
-        super().__init__()
-        if cfg.hidden_size % cfg.num_attention_heads != 0:
-            raise ValueError(
-                "The hidden size (%d) is not a multiple of the number of attention "
-                "heads (%d)" % (cfg.hidden_size, cfg.num_attention_heads)
-            )
-        self.num_attention_heads = cfg.num_attention_heads
-        self.attention_head_size = int(cfg.hidden_size / cfg.num_attention_heads)
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-
-        self.query_w = nn.Linear(cfg.hidden_size, self.all_head_size)
-        self.key_w = nn.Linear(cfg.hidden_size, self.all_head_size)
-        self.value_w = nn.Linear(cfg.hidden_size, self.all_head_size)
-
-        self.dropout = nn.Dropout(cfg.attention_probs_dropout_prob)
-
-    def transpose_for_scores(self, x):
-        new_x_shape = x.size()[:-1] + (
-            self.num_attention_heads,
-            self.attention_head_size,
-        )  # (N, L, nh, dh)
-        x = x.view(*new_x_shape)
-        return x.permute(0, 2, 1, 3)  # (N, nh, L, dh)
-
-    def forward(self, query, key, value, attention_mask=None):
-        """
-        Args:
-            query_states: (N, Lq, D)
-            key_states: (N, L, D)
-            value_states: (N, L, D)
-            attention_mask: (N, Lq, L)
-
-        Returns:
-        """
-        if attention_mask is not None:
-            attention_mask = (
-                1 - attention_mask.unsqueeze(1)
-            ) * -10000.0  # (N, 1, Lq, L)
-        mixed_query_layer = self.query_w(query)
-        mixed_key_layer = self.key_w(key)
-        mixed_value_layer = self.value_w(value)
-        query_layer = self.transpose_for_scores(mixed_query_layer)  # (N, nh, Lq, dh)
-        key_layer = self.transpose_for_scores(mixed_key_layer)  # (N, nh, L, dh)
-        value_layer = self.transpose_for_scores(mixed_value_layer)  # (N, nh, L, dh)
-        key_layer = nn.Softmax(dim=-1)(key_layer)
-        att_kv = torch.matmul(key_layer, value_layer.transpose(-1, -2))
-        # print(att_kv.shape)
-        if attention_mask is not None:
-            # print(attention_mask.shape)
-            att_kv = att_kv + attention_mask
-        att_w = torch.matmul(att_kv, query_layer) # (N, nh, L)
-        context_layer = att_w / math.sqrt(self.attention_head_size)
-
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
@@ -436,7 +292,6 @@ def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0, decoder=Fa
         max_t_len: int
         memory_len: int, M
     Returns:
-
     >>> max_v_len_ = 2
     >>> max_t_len_ = 3
     >>> input_mask_ = torch.randn(2, 5)
@@ -537,10 +392,6 @@ class EncoderWoMemory(nn.Module):
         self.layer = nn.ModuleList(
             [LayerWoMemory(cfg) for _ in range(cfg.num_hidden_layers)]
         )
-        # self.layer_c = nn.ModuleList(
-        #     [CoAtNetC(cfg) for _ in range(1)]
-        # )
-
 
     def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, clip_feats=None):
         """
@@ -550,14 +401,9 @@ class EncoderWoMemory(nn.Module):
             hidden_states: (N, L, D)
             attention_mask: (N, L)
             output_all_encoded_layers:
-
         Returns:
         """
         all_encoder_layers = []
-        # for layer_idx, layer_module in enumerate(self.layer_c):
-        #     hidden_states = layer_module(hidden_states)
-        #     if output_all_encoded_layers:
-        #         all_encoder_layers.append(hidden_states)
         for layer_idx, layer_module in enumerate(self.layer):
             hidden_states = layer_module(hidden_states, attention_mask, clip_feats)
             if output_all_encoded_layers:
@@ -598,9 +444,6 @@ class Decoder(nn.Module):
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
         )
-        self.layer_c = nn.ModuleList(
-            [CoAtNetC(cfg) for _ in range(num_hidden_layers)]
-        )
 
     def forward(self, hidden_states, attention_mask, clip_his):
         """
@@ -608,18 +451,11 @@ class Decoder(nn.Module):
             hidden_states: (N, L, D)
             attention_mask: (N, L)
             output_all_encoded_layers:
-
         Returns:
         """
         query_clip = torch.zeros(hidden_states.shape).cuda()
         query_clip = query_clip + clip_his
         all_decoder_layers = []
-        for layer_idx, layer_module in enumerate(self.layer_c):
-            hidden_states =\
-                layer_module(hidden_states)
-            # hidden_states =\
-            #     layer_module(hidden_states, query_clip)
-            all_decoder_layers.append(hidden_states)
         for layer_idx, layer_module in enumerate(self.layer):
             hidden_states =\
                 layer_module(hidden_states, attention_mask, clip_his)
@@ -633,8 +469,7 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        # self.attention = RelationalSelfAttention(cfg)
-        self.attention = MultiHeadRSA(cfg)
+        self.attention = RelationalSelfAttention(cfg)
         # self.attention = Attention(cfg)
         self.output = TrmFeedForward(cfg)
 
@@ -735,7 +570,6 @@ class EmbeddingsWithVideo(nn.Module):
             input_ids: (N, L)
             video_features: (N, L, D)
             token_type_ids: (N, L, D)
-
         Returns:
         """
         words_embeddings = self.word_fc(self.word_embeddings(input_ids))
@@ -805,36 +639,6 @@ class LMPredictionHead(nn.Module):
         return hidden_states  # (N, L, vocab_size)
 
 
-class CLIPloss(nn.Module):
-    """
-    CLIPで用いられているloss
-    https://cdn.openai.com/papers/Learning_Transferable_Visual_Models_From_Natural_Language_Supervision.pdf
-    """
-    def __init__(self):
-        super().__init__()
-        self.w = nn.Linear(25 * 768, 512)
-        self.t = torch.randn(1, requires_grad=True).cuda()
-        self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
-        self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
-        self.norm_i = nn.LayerNorm(512)
-        self.norm_t = nn.LayerNorm(512)
-
-    def forward(self, clip, text):
-        text = torch.flatten(text, 1)
-        text = self.w(text)
-        i_e = self.norm_i(clip)
-        t_e = self.norm_t(text)
-        logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
-        # print(logits)
-        # sys.exit()
-        n = i_e.shape[0]
-        labels = torch.arange(n, device=torch.device("cuda"))
-        loss_i = self.i_loss(logits, labels)
-        loss_t = self.t_loss(logits, labels)
-        cliploss = (loss_i + loss_t) / 2
-        return cliploss
-
-
 class RelationalSelfAttention(nn.Module):
     """
     Relational self-attention (RSA)
@@ -887,67 +691,6 @@ class RelationalSelfAttention(nn.Module):
         # output = self.ln(output)
         # output = self.ffn(output)
         return output
-
-
-class MultiHeadRSA(nn.Module):
-    def __init__(self, cfg, m=3):
-        super().__init__()
-        self.cfg = cfg
-        self.m = m
-        self.hidden_size = 384
-        self.head = 12
-        tmp_size = self.hidden_size // self.head
-        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.p = torch.randn((self.head, m, tmp_size), requires_grad=True).cuda()
-        self.h =\
-            torch.randn((self.head, m * tmp_size, m), requires_grad=True).cuda()
-        self.g = torch.randn((self.head, m, tmp_size), requires_grad=True).cuda()
-        self.one = torch.ones((m, 1)).cuda()
-        self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size * 2, self.hidden_size)
-        self.ln = nn.LayerNorm(self.hidden_size)
-
-    def forward(self, target, cont):
-        if self.hidden_size % self.head == 0:
-            query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
-            key = self.key_layer(cont)
-            value = self.value_layer(cont)
-
-            tmp_size = self.hidden_size // self.head
-            query = query.reshape((-1, 1, self.head, tmp_size)).permute(0, 2, 1, 3)
-            key = key.reshape((-1, self.m, self.head, tmp_size)).permute(0, 2, 1, 3)
-            value = value.reshape((-1, self.m, self.head, tmp_size)).permute(0, 2, 1, 3)
-
-            # basic kernel
-            kernel_v = torch.matmul(self.p, query.permute(0, 1, 3, 2)).reshape(-1, self.head, 1, self.m)
-
-            # relational kernel
-            q = torch.matmul(self.one, query)
-            q = F.softmax(q)
-            x_q = torch.mul(q, key)
-            x_q = x_q.reshape((-1, self.head, 1, self.m * tmp_size))
-            kernel_r = torch.matmul(x_q, self.h).reshape(-1, self.head, 1, self.m)
-            kernel = kernel_v + kernel_r
-
-            # basic context
-            # basic_cont = context.clone()
-
-            # relational context
-            xg = value.clone()
-            xg = torch.transpose(xg, 2, 3)
-            _xg = torch.matmul(xg, self.g)
-            x_nr = torch.matmul(value, _xg)
-            context = x_nr + value
-
-            output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
-            # output = F.softmax(output)
-            output = self.ln(output)
-            output = self.ffn(output)
-            return output
-        else:
-            print("hidden_size/head was wrong", file=sys.stderr)
-            sys.exit(1)
 
 
 class FeedforwardNeuralNetModel(nn.Module):
@@ -1038,30 +781,25 @@ class RecursiveTransformer(nn.Module):
             )
         else:
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
-        # self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
-        self.cliploss = CLIPloss()
+        self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
-        self.size_adjust = nn.Sequential(
-            nn.Linear(512, 384),
-            # nn.LayerNorm(input_size)
-        )
-        self.upsampling = nn.Sequential(
-            nn.Linear(384, 512),
-            # nn.LayerNorm(512)
-        )
+        self.size_adjust = nn.Linear(512, 384)
+        self.upsampling = nn.Linear(384, 512)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
             nn.Linear(input_size * 2, input_size),
             nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(input_size, input_size),
         )
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size),
             nn.ReLU(),
             nn.Linear(input_size, input_size),
+            nn.Dropout(0.2),
         )
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
@@ -1075,7 +813,7 @@ class RecursiveTransformer(nn.Module):
             # which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
             module.weight.data.normal_(mean=0.0, std=self.cfg.initializer_range)
-        elif isinstance(module, LayerNorm):
+        elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
         if isinstance(module, nn.Linear) and module.bias is not None:
@@ -1088,26 +826,30 @@ class RecursiveTransformer(nn.Module):
         single step forward in the recursive structure
         """
         video_features = self.size_adjust(video_features)
+        image_features = self.cnn(image_features) # CNNで6×768にする
+        #image_featuresに[CLS]トークンを結合
+        features = torch.cat(image_features, text)
         self.future_rec = []
         self.future_gt = []
-        # preprocess
-        # vid_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
         if gt_clip is None:
             gt_clip = video_features[:, 1:4, :].clone().cuda()
-        clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
-        clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
+        # preprocess
+        # clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
+        # clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
 
-        future_b = torch.zeros(video_features[:, 3, :].shape)
-        future_b = video_features[:, 3, :].clone()
-        future_b = self.pred_f(future_b)
-        tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
-        clip_feats[:, 2, :] = self.z_f * tmp_feat_f + (1 - self.z_f) * future_b
+        # future_b = torch.zeros(video_features[:, 3, :].shape)
+        # future_b = video_features[:, 3, :].clone()
+        # future_b = self.pred_f(future_b)
+        # tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
+        # clip_feats[:, 2, :] = self.z_f * tmp_feat_f + (1 - self.z_f) * future_b
 
-        past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
-        tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
-        # vid_feats[:, 0, :] = past_feats.reshape((-1, 384))
-        past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
-        clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
+        # past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
+        # tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
+        # past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
+        # clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
+        clip_feats = features[0:5]
+
+        # clip_feats = self.ff(clip_feats)
 
         # Time Series Module
         _, clip_feats = self.TSModule(clip_feats)
@@ -1127,7 +869,8 @@ class RecursiveTransformer(nn.Module):
             decoded_layer_outputs[-1]
         )  # (N, L, vocab_size)
         future_b = self.upsampling(future_b)
-        return decoded_layer_outputs[-1], prediction_scores, future_b
+        return encoded_layer_outputs, prediction_scores, future_b
+        # return encoded_layer_outputs, prediction_scores
 
     # ver. future
     def forward(
@@ -1137,7 +880,7 @@ class RecursiveTransformer(nn.Module):
         input_masks_list,
         token_type_ids_list,
         input_labels_list,
-        gt_clip,
+        gt_clip=None,
     ):
         """
         Args:
@@ -1150,19 +893,23 @@ class RecursiveTransformer(nn.Module):
                 will not be used when return_memory is True, thus can be None in this case
             return_memory: bool,
         Returns:
+        new args:
+            image[6, 3, 128, 128]
+            txt[22, 768]
+            input_mask_list,
+            gt_image [1, 3, 128, 128]
+
         """
         # [(N, M, D)] * num_hidden_layers, initialized internally
-        # print(input_masks_list)
         step_size = len(input_ids_list)
-        decoded_outputs_list = []  # [(N, L, D)] * step_size
+        encoded_outputs_list = []  # [(N, L, D)] * step_size
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-        action_score = []
         future_rec = []
         future_gt = []
-        video_feat_list = []
+        action_score = []
         if gt_clip is not None:
             for idx in range(step_size):
-                decoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+                encoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
                     input_ids_list[idx],
                     video_features_list[idx],
                     input_masks_list[idx],
@@ -1170,33 +917,21 @@ class RecursiveTransformer(nn.Module):
                 )
                 future_gt.append(gt_clip[idx])
                 future_rec.append(pred_future)
-                decoded_outputs_list.append(decoded_layer_outputs)
+                encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
-                action_score.append(prediction_scores[:, 3, :])
-                future_gt.append(gt_clip[idx][:, 0, :])
-                future_rec.append(pred_future)
-                decoded_outputs_list.append(decoded_layer_outputs)
-                prediction_scores_list.append(prediction_scores)
-                video_feat_list.append(video_features_list[idx][:, 1, :])
                 action_score.append(prediction_scores[:, 3, :])
         else:
             for idx in range(step_size):
-                decoded_layer_outputs, prediction_scores, pred_future = self.forward_step(
+                encoded_layer_outputs, prediction_scores = self.forward_step(
                     input_ids_list[idx],
                     video_features_list[idx],
                     input_masks_list[idx],
                     token_type_ids_list[idx]
                 )
-                decoded_outputs_list.append(decoded_layer_outputs)
+                encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
                 action_score.append(prediction_scores[:, 3, :])
-                future_gt.append(gt_clip[idx][:, 0, :])
-                future_rec.append(pred_future)
-                decoded_outputs_list.append(decoded_layer_outputs)
-                prediction_scores_list.append(prediction_scores)
-                video_feat_list.append(video_features_list[idx][:, 1, :])
-                action_score.append(prediction_scores[:, 3, :])
-            # compute loss, get predicted words
+        # compute loss, get predicted words
         caption_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
@@ -1216,16 +951,17 @@ class RecursiveTransformer(nn.Module):
                 else:
                     action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 0.0
-            # tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
-            # tmp_idx_list = input_labels_list[idx].view(-1)
-            # for i in range(1, len(tmp_pred_score_list)):
-            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-            # for i in range(0, len(tmp_pred_score_list) - 1):
-            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
-            cont_loss += self.cliploss(video_feat_list[idx], decoded_outputs_list[idx])
-            fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
-            caption_loss +=\
-                1.0 * snt_loss + 0.1 * fut_loss + cont_loss + 10 * action_loss
-                # 1.0 * snt_loss + 0.01 * fut_loss + 0.005 * (1.0 / cont_loss) + 10 * action_loss
+            tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
+            tmp_idx_list = input_labels_list[idx].view(-1)
+            for i in range(1, len(tmp_pred_score_list)):
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            for i in range(0, len(tmp_pred_score_list) - 1):
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            if gt_clip is not None:
+                fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
+
+            # caption_loss += 0.9 * snt_loss
+            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
+            # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
