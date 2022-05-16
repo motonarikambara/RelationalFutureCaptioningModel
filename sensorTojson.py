@@ -57,6 +57,10 @@ def main_train():
                 course_vel -= 360
             speed_post = speed
             course_post = course
+            if course == -1:
+                course = 0
+            else:
+                course -= 180
             json_list.append({'img_path':img_path, 'speed':speed, 'course':course, 'accelerater':accel, 'course_vel':course_vel})
 
     # 辞書オブジェクトをJSONファイルへ出力

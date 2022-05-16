@@ -510,7 +510,7 @@ class SensorTransformer(nn.Module):
             # hidden_states =\
             #     layer_module(hidden_states, query_clip)
             pred_sens.append(hidden_states)
-        return pred_sens[-1] # (batch_size, 4, 384)
+        return pred_sens[-1] # (batch_size, 4, 786)
 
 
 class TrmEncLayer(nn.Module):
@@ -734,7 +734,6 @@ class RelationalSelfAttention(nn.Module):
         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
 
         return output
-
 
 
 class TimeSeriesMoudule(nn.Module):
@@ -990,6 +989,7 @@ class RecursiveTransformer(nn.Module):
             c_loss = self.closs(sense_pre_list[idx][:, 2, :], (gt_sens[idx][:, 2, :] - crs_mean) / crs_std)
             cv_loss = self.cvloss(sense_pre_list[idx][:, 3, :], (gt_sens[idx][:, 3, :] - crs_vel_mean) / crs_vel_std)
             sens_loss += v_loss + va_loss + c_loss + cv_loss
+            # print(sens_loss)
             # for actidx in range(len(gt_action_list)):
             #     gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
             #     gt_idx = gt_action.tolist()
@@ -1009,7 +1009,10 @@ class RecursiveTransformer(nn.Module):
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
 
-            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + sens_loss
+            # print(snt_loss)
+            # print(fut_loss)
+            caption_loss += 0.9 * snt_loss + fut_loss + 0.05 * sens_loss
+            # print(caption_loss)
 
         caption_loss /= step_size
         return caption_loss, prediction_scores_list

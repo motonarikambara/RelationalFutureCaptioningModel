@@ -14,6 +14,13 @@ from torch import nn
 import copy
 import pickle
 import re
+import subprocess as sp
+from future_emb import main_train as ftrain
+from future_emb import main_valid as fval
+from future_emb import main_test as ftest
+from captionDelete import main_train as cdtrain
+from captionDelete import main_valid as cdval
+from captionDelete import main_test as cdtest
 
 
 class MyDataset(torch.utils.data.Dataset):
@@ -23,7 +30,6 @@ class MyDataset(torch.utils.data.Dataset):
         y = []
         json_open = open(label_path, 'r')
         json_load = json.load(json_open)
-
 
         for v in json_load:
             y_temp = []
@@ -254,7 +260,7 @@ class RegressionNet(nn.Module):
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(6)])
 
         self.fc1 = nn.Linear(256 * 6, 768)
-        self.fc2 = nn.Linear(768, 192)
+        self.fc2 = nn.Linear(768, 576)
         # self.fc3 = nn.Linear(192, 64)
         # self.fc4 = nn.Linear(64, 8)
         # self.fc5 = nn.Linear(8, 1)
@@ -304,11 +310,11 @@ class MainNet(nn.Module):
 
         self.layer = RegressionNet()
 
-        # self.fc2 = nn.Linear(768, 192)
-        self.fc3 = nn.Linear(192, 64)
+        self.fc3 = nn.Linear(576, 192)
+        self.fc4 = nn.Linear(192, 64)
 
-        self.fc4 = nn.Linear(64, 8)
-        self.fc5 = nn.Linear(8, 1)
+        self.fc5 = nn.Linear(64, 8)
+        self.fc6 = nn.Linear(8, 1)
 
 
     def forward(self, x_list):
@@ -316,9 +322,26 @@ class MainNet(nn.Module):
         # x = self.fc2(x)
         x = F.relu(self.fc3(x))
         x = F.relu(self.fc4(x))
-        x = self.fc5(x)
+        x = F.relu(self.fc5(x))
+        x = self.fc6(x)
 
         return x
+
+
+class OutNet(nn.Module):
+    def __init__(self):
+        super(OutNet, self).__init__()
+
+        self.ln = nn.LayerNorm(576)
+        self.pool = nn.MaxPool1d(3, stride=3)
+
+    def forward(self, x):
+        x = F.relu(self.ln(x))
+        x = self.pool(x)
+
+        return x
+
+
 
 
 def main():
@@ -365,6 +388,7 @@ def main():
 
 
     net = MainNet()
+    outnet = OutNet()
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     net = net.to(device)
 
@@ -372,65 +396,83 @@ def main():
     criterion = nn.MSELoss()
 
     valid_out = []
+    mode_list = ['train', 'valid', 'test']
+    for filename in mode_list:
+        sp.run('rm -rf ./out/pretrain/future_' + filename + '/*')
 
-    # with torch.set_grad_enabled(True):
-    #     for data in tqdm(train_rfcmDataloader):
-    #         inputs, labels, clip_id = data
-    #         input_list = []
-    #         for _inputs in inputs:
-    #             _inputs = _inputs.to(device)
-    #             input_list.append(_inputs)
-    #         # inputs = inputs.to(device)
-    #         labels = labels.to(device)
-    #         # print(input_list)
-    #         if len(input_list) == 0:
-    #             continue
-    #         output = net.layer(input_list)
-    #         # print(clip_id)
-    #         with open("./out/pretrain/train_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
-    #             pickle.dump(labels, f)
-    #         with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
-    #             pickle.dump(output, f)
-    #         if clip_id[0] == '10192_30_32':
-    #             break
+    with torch.set_grad_enabled(True):
+        for data in tqdm(train_rfcmDataloader):
+            inputs, labels, clip_id = data
+            input_list = []
+            for _inputs in inputs:
+                _inputs = _inputs.to(device)
+                input_list.append(_inputs)
+            # inputs = inputs.to(device)
+            labels = labels.to(device)
+            # print(input_list)
+            if len(input_list) == 0:
+                continue
+            output = net.layer(input_list)
+            output = outnet(output)
+            print(output.shape)
+            # print(clip_id)
+            with open("./out/pretrain/train_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(labels, f)
+            with open("./out/pretrain/train/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(output, f)
+            if clip_id[0] == '10192_30_32':
+                break
 
-    # with torch.set_grad_enabled(True):
-    #     for data in tqdm(valid_rfcmDataloader):
-    #         inputs, labels, clip_id = data
-    #         input_list = []
-    #         for _inputs in inputs:
-    #             _inputs = _inputs.to(device)
-    #             input_list.append(_inputs)
-    #         # inputs = inputs.to(device)
-    #         if len(input_list) == 0:
-    #             continue
-    #         labels = labels.to(device)
-    #         output = net.layer(input_list)
-    #         with open("./out/pretrain/valid_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
-    #             pickle.dump(labels, f)
-    #         with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
-    #             pickle.dump(output, f)
-    #         if clip_id[0] == '11594_23_25':
-    #             break
+    with torch.set_grad_enabled(True):
+        for data in tqdm(valid_rfcmDataloader):
+            inputs, labels, clip_id = data
+            input_list = []
+            for _inputs in inputs:
+                _inputs = _inputs.to(device)
+                input_list.append(_inputs)
+            # inputs = inputs.to(device)
+            if len(input_list) == 0:
+                continue
+            labels = labels.to(device)
+            output = net.layer(input_list)
+            output = outnet(output)
+            # print(output.shape)
+            with open("./out/pretrain/valid_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(labels, f)
+            with open("./out/pretrain/valid/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(output, f)
+            if clip_id[0] == '11594_23_25':
+                break
 
-    # with torch.set_grad_enabled(True):
-    #     for data in tqdm(test_rfcmDataloader):
-    #         inputs, labels, clip_id = data
-    #         input_list = []
-    #         for _inputs in inputs:
-    #             _inputs = _inputs.to(device)
-    #             input_list.append(_inputs)
-    #         if len(input_list) == 0:
-    #             continue
-    #         # inputs = inputs.to(device)
-    #         labels = labels.to(device)
-    #         output = net.layer(input_list)
-    #         with open("./out/pretrain/test_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
-    #             pickle.dump(labels, f)
-    #         with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
-    #             pickle.dump(output, f)
-    #         if clip_id[0] == '12994_0_38':
-    #             break
+    with torch.set_grad_enabled(True):
+        for data in tqdm(test_rfcmDataloader):
+            inputs, labels, clip_id = data
+            input_list = []
+            for _inputs in inputs:
+                _inputs = _inputs.to(device)
+                input_list.append(_inputs)
+            if len(input_list) == 0:
+                continue
+            # inputs = inputs.to(device)
+            labels = labels.to(device)
+            output = net.layer(input_list)
+            output = outnet(output)
+            # print(output.shape)
+            with open("./out/pretrain/test_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(labels, f)
+            with open("./out/pretrain/test/" + clip_id[0] + ".pkl", mode="wb") as f:
+                pickle.dump(output, f)
+            if clip_id[0] == '12994_0_38':
+                break
+
+    # その他のfileづくり
+    ftrain()
+    fval()
+    ftest()
+    cdtrain()
+    cdval()
+    cdtest()
+
 
     for epoch in tqdm(range(30)):
         # 学習
@@ -564,6 +606,10 @@ def main():
         json.dump(valid_out, file, ensure_ascii=False, indent=None)
 
 
+    mode_list = ['train', 'valid', 'test']
+    for filename in mode_list:
+        sp.run('rm -rf ./out/pretrain/future_' + filename + '/*')
+
     with torch.set_grad_enabled(True):
         for data in tqdm(train_rfcmDataloader):
             inputs, labels, clip_id = data
@@ -577,6 +623,7 @@ def main():
             if len(input_list) == 0:
                 continue
             output = net.layer(input_list)
+            output = outnet(output)
             # print(output.shape)
             # print(clip_id)
             with open("./out/pretrain/train_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
@@ -598,6 +645,7 @@ def main():
                 continue
             labels = labels.to(device)
             output = net.layer(input_list)
+            output = outnet(output)
             # print(output.shape)
             with open("./out/pretrain/valid_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(labels, f)
@@ -618,6 +666,7 @@ def main():
             # inputs = inputs.to(device)
             labels = labels.to(device)
             output = net.layer(input_list)
+            output = outnet(output)
             # print(output.shape)
             with open("./out/pretrain/test_labels/" + clip_id[0] + ".pkl", mode="wb") as f:
                 pickle.dump(labels, f)
@@ -625,6 +674,14 @@ def main():
                 pickle.dump(output, f)
             if clip_id[0] == '12994_0_38':
                 break
+
+    # その他のfileづくり
+    ftrain()
+    fval()
+    ftest()
+    cdtrain()
+    cdval()
+    cdtest()
 
 
 if __name__ == "__main__":
