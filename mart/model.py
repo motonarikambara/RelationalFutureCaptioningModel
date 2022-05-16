@@ -757,6 +757,31 @@ class TimeSeriesMoudule(nn.Module):
         return ts_feats, tmp_feats
 
 
+class CNNLayer(nn.Module):
+    def __init__(self):
+        super(CNNLayer, self).__init__()
+
+        self.conv1 = nn.Conv2d(3, 16, 2, stride=2) # (64, 64)
+        self.conv2 = nn.Conv2d(16, 32, 2, stride=2) # (32, 32)
+        self.conv3 = nn.Conv2d(32, 64, 4, stride=4) # (8, 8)
+        self.conv4 = nn.Conv2d(64, 128, 2, stride=2) # (4, 4)
+        self.conv5 = nn.Conv2d(128, 1024, 4) # (1, 1)
+        self.fc1 = nn.Linear(1024, 768)
+
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.conv4(x))
+        x = F.relu(self.conv5(x))
+
+        x = x.view(-1, 1024)
+        x  = self.fc1(x)
+
+        return x
+
+
 # MART model
 class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
@@ -804,6 +829,8 @@ class RecursiveTransformer(nn.Module):
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
+        self.cnn = CNNLayer()
+
     def init_bert_weights(self, module):
         """
         Initialize the weights.
@@ -820,19 +847,21 @@ class RecursiveTransformer(nn.Module):
             module.bias.data.zero_()
 
     def forward_step(
-        self, input_ids, video_features, input_masks, token_type_ids, gt_clip=None
+        self, input_ids, image_features, text, input_masks, token_type_ids, gt_clip=None
     ):
         """
         single step forward in the recursive structure
         """
-        video_features = self.size_adjust(video_features)
+        # video_features = self.size_adjust(video_features)
         image_features = self.cnn(image_features) # CNNで6×768にする
-        #image_featuresに[CLS]トークンを結合
-        features = torch.cat(image_features, text)
+        #image_featuresに[SEP]トークンを結合
+        zeros = torch.zeros(1, 768)
+        image_features = torch.cat((image_features, zeros), dim=1)
+        features = torch.cat((image_features, text), dim=1)
         self.future_rec = []
         self.future_gt = []
-        if gt_clip is None:
-            gt_clip = video_features[:, 1:4, :].clone().cuda()
+        # if gt_clip is None:
+        #     gt_clip = video_features[:, 1:4, :].clone().cuda()
         # preprocess
         # clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
         # clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
@@ -855,7 +884,7 @@ class RecursiveTransformer(nn.Module):
         _, clip_feats = self.TSModule(clip_feats)
 
         embeddings = self.embeddings(
-            input_ids, video_features, token_type_ids
+            input_ids, image_features, text, token_type_ids
         )  # (N, L, D)
         # clip_his = torch.zeros((embeddings.shape)).cuda()
         # clip_his = clip_his + ts_feats
@@ -868,8 +897,8 @@ class RecursiveTransformer(nn.Module):
         prediction_scores = self.decoder(
             decoded_layer_outputs[-1]
         )  # (N, L, vocab_size)
-        future_b = self.upsampling(future_b)
-        return encoded_layer_outputs, prediction_scores, future_b
+        # future_b = self.upsampling(future_b)
+        return encoded_layer_outputs, prediction_scores # , future_b
         # return encoded_layer_outputs, prediction_scores
 
     # ver. future
