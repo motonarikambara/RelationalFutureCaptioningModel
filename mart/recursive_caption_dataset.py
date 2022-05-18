@@ -134,11 +134,11 @@ class RecursiveCaptionDataset(data.Dataset):
         # determine metadata file
         tmp_path = "ponnet"
         if mode == "train":  # 1333 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_train.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
         elif mode == "val":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_val.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_valid.json"
         elif mode == "test":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_test.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_test.json"
             mode = "val"
             self.mode = "val"
         else:
@@ -209,6 +209,8 @@ class RecursiveCaptionDataset(data.Dataset):
         image_feats.append(image_feats[-1])
         image_feats = np.array(image_feats)
         future_image = cv2.imread(os.path.join(future_feat_n, raw_name + ".png"))
+        # print(os.path.join(future_feat_n, raw_name + ".png"))
+        future_image = cv2.resize(future_image, dsize=(128, 128))
 
         return image_feats, future_image
 
@@ -283,6 +285,7 @@ class RecursiveCaptionDataset(data.Dataset):
             + [self.IGNORE]
         )
         input_mask = video_mask + text_mask
+        # print('mask', len(input_mask))
         token_type_ids = [0] * self.max_v_len + [1] * self.max_t_len
 
         # ver. future

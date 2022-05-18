@@ -149,7 +149,7 @@ class Translator(object):
         )
         for cur_input_masks in input_ids_list:
             assert (
-                torch.sum(cur_input_masks[:, self.cfg.max_v_len + 1 :]) == 0
+                torch.sum(cur_input_masks[:, self.cfg.max_v_len + 3 :]) == 0
             ), "Initially, all text tokens should be masked"
 
         config = rt_model.cfg
@@ -165,7 +165,7 @@ class Translator(object):
                     input_masks_list[idx],
                     token_type_ids_list[idx],
                     rt_model,
-                    config.max_v_len,
+                    config.max_v_len + 2,
                     config.max_t_len,
                 )
                 dec_seq_list.append(dec_seq)

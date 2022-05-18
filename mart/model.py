@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.tensorboard.summary import video
+import torch.nn.utils.rnn as rnn
 
 from mart.configs_mart import MartConfig, MartPathConst
 from mart.masked_transformer import MTransformer
@@ -192,6 +193,8 @@ class SelfAttention(nn.Module):
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers
             # in BertModel forward() function)
+            # print("att_w", att_w.shape)
+            # print("att_mask", attention_mask.shape)
             att_w = att_w + attention_mask
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(att_w)
@@ -303,6 +306,10 @@ def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0, decoder=Fa
             [1., 1., 1., 1., 1.]])
     """
     bsz, seq_len = input_mask.shape
+    # print("max_v_len: ", max_v_len)
+    # print("max_t_len: ", max_t_len)
+    # print("memory_len: ", memory_len)
+    # print("seq_len: ", seq_len)
     assert max_v_len + max_t_len + memory_len == seq_len
     shifted_mask = input_mask.new_zeros(
         bsz, max_v_len + max_t_len, seq_len
@@ -378,7 +385,7 @@ class LayerWoMemory(nn.Module):
         max_v_len, max_t_len = self.cfg.max_v_len, self.cfg.max_t_len
         # self-attention, need to shift right
         shifted_self_mask = make_pad_shifted_mask(
-            attention_mask, max_v_len, max_t_len
+            attention_mask, max_v_len + 2, max_t_len
         )  # (N, L, L)
         attention_output = self.attention(hidden_states, shifted_self_mask, clip_feats)
         intermediate_output = self.hidden_intermediate(attention_output)
@@ -431,7 +438,7 @@ class DecoderLayer(nn.Module):
         max_v_len, max_t_len = self.cfg.max_v_len, self.cfg.max_t_len
         # self-attention, need to shift right
         shifted_self_mask = make_pad_shifted_mask(
-            attention_mask, max_v_len, max_t_len, decoder=True
+            attention_mask, max_v_len + 2, max_t_len, decoder=True
         )  # (N, L, L)
         att = self.attention(x, shifted_self_mask, clip_his)
         layer_output = self.output(att, att)  # (N, L, D)
@@ -439,7 +446,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=3):
+    def __init__(self, cfg, num_hidden_layers=6):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -481,6 +488,7 @@ class TrmEncLayer(nn.Module):
         """
         tmp_x = x.clone()
         target = x[:, 1, :].clone()
+        # print('trm_encoder:', target.shape, tmp_x.shape)
         target = self.attention(target, tmp_x)
         x[:, 1, :] = target.clone()
         # x = self.attention(x)
@@ -489,15 +497,17 @@ class TrmEncLayer(nn.Module):
 
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, cfg, num_layers=1):
+    def __init__(self, cfg, num_layers=2):
         super().__init__()
         self.cfg = cfg
-        self.pe = PositionEncoding(n_filters=384)
+        self.pe = PositionEncoding(n_filters=768)
         self.layers = nn.ModuleList([TrmEncLayer(self.cfg) for _ in range(num_layers)])
         self.ff = TrmFeedForward(self.cfg)
 
     def forward(self, x):
+        # print("__pe :", x.shape)
         x = self.pe(x)
+        # print("pe :", x.shape)
         for layer in self.layers:
             x = layer(x)
         x = self.ff(x, x)
@@ -520,7 +530,7 @@ class EmbeddingsWithVideo(nn.Module):
         """
         add_postion_embeddings: whether to add absolute positional embeddings
         """
-        cfg.video_feature_size = 384
+        cfg.video_feature_size = 768
         self.add_postion_embeddings = add_postion_embeddings
         self.word_embeddings = nn.Embedding(
             cfg.vocab_size, cfg.word_vec_size, padding_idx=0
@@ -578,7 +588,13 @@ class EmbeddingsWithVideo(nn.Module):
         words_embeddings += token_type_embeddings
         # print(words_embeddings.shape)
         # print(video_embeddings.shape)
-        embeddings = torch.cat((video_embeddings, words_embeddings[:, 8:, :]), dim=1) + token_type_embeddings
+        zeros = torch.zeros(video_embeddings.size()[0], 1, 768)
+        zeros = zeros.cuda()
+        # print("zero :", zeros.shape)
+        # print("video :", video_embeddings.shape)
+        # print("word :", words_embeddings[:, 8:, :].shape)
+        # print("type :", token_type_embeddings.shape)
+        embeddings = torch.cat((zeros, video_embeddings, words_embeddings[:, 8:, :], zeros), dim=1) + token_type_embeddings
         # embeddings = words_embeddings + video_embeddings + token_type_embeddings
 
         if self.add_postion_embeddings:
@@ -651,7 +667,7 @@ class RelationalSelfAttention(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.m = m
-        self.hidden_size = 384
+        self.hidden_size = 768
         self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
@@ -664,9 +680,11 @@ class RelationalSelfAttention(nn.Module):
         self.ln = nn.LayerNorm(self.hidden_size)
 
     def forward(self, target, cont):
+        # print(target.shape, cont.shape)
         query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
         key = self.key_layer(cont)
         value = self.value_layer(cont)
+        # print(query.shape, key.shape, value.shape)
 
         # basic kernel
         kernel_v = torch.matmul(self.p, query).reshape(-1, 1, self.m)
@@ -688,9 +706,9 @@ class RelationalSelfAttention(nn.Module):
         _xg = torch.matmul(xg, self.g)
         x_nr = torch.matmul(value, _xg)
         context = x_nr + value
-        print(kernel.shape, context.shape)
+        # print(kernel.shape, context.shape)
         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
-        print(output.shape)
+        # print(output.shape)
 
         # output = self.ln(output)
         # output = self.ffn(output)
@@ -743,16 +761,17 @@ class TimeSeriesMoudule(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.cfg.hidden_size = 384
-        self.hidden_size = 384
+        self.cfg.hidden_size = 768
+        self.hidden_size = 768
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         self.layernorm = nn.LayerNorm(self.hidden_size)
-        self.cfg.hidden_size = 384
+        self.cfg.hidden_size = 768
         self.z = torch.randn(1, requires_grad=True).cuda()
 
     def forward(self, x):
         ts_feats = x.clone().cuda()
+        # print("TSM :", ts_feats.shape)
         ts_feats = self.TSEncoder(ts_feats)
         ts_feats = self.z * x + (1 - self.z) * ts_feats
         ts_feats = self.expand(ts_feats)
@@ -765,12 +784,12 @@ class SubLayer(nn.Module):
     def __init__(self):
         super(SubLayer, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 16, 2, stride=2) # (64, 64)
-        self.conv2 = nn.Conv2d(16, 32, 2, stride=2) # (32, 32)
-        self.conv3 = nn.Conv2d(32, 64, 4, stride=4) # (8, 8)
-        self.conv4 = nn.Conv2d(64, 128, 2, stride=2) # (4, 4)
-        self.conv5 = nn.Conv2d(128, 1024, 4) # (1, 1)
-        self.fc1 = nn.Linear(1024, 384)
+        self.conv1 = nn.Conv2d(3, 16, 2, stride=2) # (360, 640)
+        self.conv2 = nn.Conv2d(16, 32, 4, stride=4) # (90, 160)
+        self.conv3 = nn.Conv2d(32, 64, (3, 4), stride=(3, 4)) # (30, 40)
+        self.conv4 = nn.Conv2d(64, 128, 5, stride=5) # (6, 8)
+        self.conv5 = nn.Conv2d(128, 1024, (6, 8)) # (1, 1)
+        self.fc1 = nn.Linear(1024, 768)
 
 
     def forward(self, x):
@@ -798,9 +817,12 @@ class CNNLayer(nn.Module):
         x = x.permute(0, 1, 4, 2, 3)
         feature_img_list = []
         for idx in range(6):
+            # print("x :", x[:, idx, :, :, :].shape)
             _x = self.layer[idx](x[:, idx, :, :, :])
             feature_img_list.append(_x)
+            # print("_x:", _x.shape)
         emb = torch.cat(feature_img_list, dim=1)
+        # print("emb:", emb.shape)
         return emb
 
 
@@ -833,16 +855,16 @@ class RecursiveTransformer(nn.Module):
         self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
-        input_size = 384
-        # self.size_adjust = nn.Linear(512, 384)
-        # self.upsampling = nn.Linear(384, 512)
+        input_size = 768
+        # self.size_adjust = nn.Linear(512, 768)
+        # self.upsampling = nn.Linear(768, 512)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
             nn.Linear(input_size * 2, input_size),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(input_size, input_size),
+            nn.Linear(input_size, 49152),
         )
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size),
@@ -877,9 +899,9 @@ class RecursiveTransformer(nn.Module):
         single step forward in the recursive structure
         """
         # video_features = self.size_adjust(video_features)
-        image_features = self.cnn(image_features) # CNNで6×384にする
+        image_features = self.cnn(image_features) # CNNで6×768にする
         #image_featuresに[SEP]トークンを結合
-        # zeros = torch.zeros(1, 384)
+        # zeros = torch.zeros(1, 768)
         # image_features = torch.cat((image_features, zeros), dim=1)
         # features = torch.cat((image_features, text), dim=1)
         self.future_rec = []
@@ -890,20 +912,22 @@ class RecursiveTransformer(nn.Module):
         # clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
         # clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
 
-        # future_b = torch.zeros(video_features[:, 3, :].shape)
-        # future_b = video_features[:, 3, :].clone()
-        # future_b = self.pred_f(future_b)
+        future_b = torch.zeros(image_features[:, 3, :].shape)
+        future_b = image_features[:, 5, :].clone()
+        future_b = self.pred_f(future_b)
+        future_b = future_b.reshape((-1, 128, 128, 3))
         # tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
         # clip_feats[:, 2, :] = self.z_f * tmp_feat_f + (1 - self.z_f) * future_b
 
-        # past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
-        # tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
+        # past_feats = gt_clip[:, 0, :].reshape((-1, 1, 768)).clone().cuda()
+        # tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 768)).clone().cuda()
         # past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
-        # clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
+        # clip_feats[:, 0, :] = past_feats.reshape((-1, 768))
 
         # clip_feats = self.ff(clip_feats)
 
         # Time Series Module
+        # print("_img_feature :", image_features.shape)
         _, clip_feats = self.TSModule(image_features)
 
         embeddings = self.embeddings(
@@ -921,7 +945,7 @@ class RecursiveTransformer(nn.Module):
             decoded_layer_outputs[-1]
         )  # (N, L, vocab_size)
         # future_b = self.upsampling(future_b)
-        return encoded_layer_outputs, prediction_scores # , future_b
+        return encoded_layer_outputs, prediction_scores, future_b
         # return encoded_layer_outputs, prediction_scores
 
     # ver. future
@@ -947,7 +971,7 @@ class RecursiveTransformer(nn.Module):
         Returns:
         new args:
             image[6, 3, 128, 128]
-            txt[22, 384]
+            txt[22, 768]
             input_mask_list,
             gt_image [1, 3, 128, 128]
 
