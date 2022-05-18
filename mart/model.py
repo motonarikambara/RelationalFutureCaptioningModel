@@ -700,7 +700,7 @@ class RelationalSelfAttention(nn.Module):
 
         # basic context
         # basic_cont = context.clone()
-        
+
         # relational context
         xg = value.clone()
         xg = torch.transpose(xg, 1, 2)
@@ -929,7 +929,7 @@ class RecursiveTransformer(nn.Module):
                 cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
-            
+
             # caption_loss += 0.9 * snt_loss
             caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)

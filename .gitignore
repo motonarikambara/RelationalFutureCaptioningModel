@@ -13,7 +13,8 @@
 /assets/
 /pretrained*/
 /wandb/
-
+/BDD-X-Dataset/
+/out/
 
 
 # ---------- general
@@ -48,6 +49,7 @@ __pycache__/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.python-version
 
 # testing
 htmlcov/
