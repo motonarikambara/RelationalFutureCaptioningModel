@@ -439,7 +439,7 @@ class DecoderLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=5):
+    def __init__(self, cfg, num_hidden_layers=3):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -489,7 +489,7 @@ class TrmEncLayer(nn.Module):
 
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, cfg, num_layers=2):
+    def __init__(self, cfg, num_layers=1):
         super().__init__()
         self.cfg = cfg
         self.pe = PositionEncoding(n_filters=384)
@@ -576,7 +576,10 @@ class EmbeddingsWithVideo(nn.Module):
         video_embeddings = self.video_embeddings(video_features)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
         words_embeddings += token_type_embeddings
-        embeddings = words_embeddings + video_embeddings + token_type_embeddings
+        # print(words_embeddings.shape)
+        # print(video_embeddings.shape)
+        embeddings = torch.cat((video_embeddings, words_embeddings[:, 8:, :]), dim=1) + token_type_embeddings
+        # embeddings = words_embeddings + video_embeddings + token_type_embeddings
 
         if self.add_postion_embeddings:
             embeddings = self.position_embeddings(embeddings)
@@ -644,7 +647,7 @@ class RelationalSelfAttention(nn.Module):
     Relational self-attention (RSA)
     https://arxiv.org/pdf/2111.01673.pdf
     """
-    def __init__(self, cfg, m=3):
+    def __init__(self, cfg, m=6):
         super().__init__()
         self.cfg = cfg
         self.m = m
@@ -685,8 +688,9 @@ class RelationalSelfAttention(nn.Module):
         _xg = torch.matmul(xg, self.g)
         x_nr = torch.matmul(value, _xg)
         context = x_nr + value
-
+        print(kernel.shape, context.shape)
         output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
+        print(output.shape)
 
         # output = self.ln(output)
         # output = self.ffn(output)
@@ -740,11 +744,11 @@ class TimeSeriesMoudule(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.cfg.hidden_size = 384
-        self.hidden_size = 768
+        self.hidden_size = 384
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
         self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         self.layernorm = nn.LayerNorm(self.hidden_size)
-        self.cfg.hidden_size = 768
+        self.cfg.hidden_size = 384
         self.z = torch.randn(1, requires_grad=True).cuda()
 
     def forward(self, x):
@@ -757,16 +761,16 @@ class TimeSeriesMoudule(nn.Module):
         return ts_feats, tmp_feats
 
 
-class CNNLayer(nn.Module):
+class SubLayer(nn.Module):
     def __init__(self):
-        super(CNNLayer, self).__init__()
+        super(SubLayer, self).__init__()
 
         self.conv1 = nn.Conv2d(3, 16, 2, stride=2) # (64, 64)
         self.conv2 = nn.Conv2d(16, 32, 2, stride=2) # (32, 32)
         self.conv3 = nn.Conv2d(32, 64, 4, stride=4) # (8, 8)
         self.conv4 = nn.Conv2d(64, 128, 2, stride=2) # (4, 4)
         self.conv5 = nn.Conv2d(128, 1024, 4) # (1, 1)
-        self.fc1 = nn.Linear(1024, 768)
+        self.fc1 = nn.Linear(1024, 384)
 
 
     def forward(self, x):
@@ -776,10 +780,30 @@ class CNNLayer(nn.Module):
         x = F.relu(self.conv4(x))
         x = F.relu(self.conv5(x))
 
-        x = x.view(-1, 1024)
+        # x = x.view(-1, 1, 1024)
+        x = torch.reshape(x,(-1, 1, 1024))
         x  = self.fc1(x)
 
         return x
+
+
+class CNNLayer(nn.Module):
+    def __init__(self):
+        super(CNNLayer, self).__init__()
+
+        layer = SubLayer()
+        self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(6)])
+
+    def forward(self, x):
+        x = x.permute(0, 1, 4, 2, 3)
+        feature_img_list = []
+        for idx in range(6):
+            _x = self.layer[idx](x[:, idx, :, :, :])
+            feature_img_list.append(_x)
+        emb = torch.cat(feature_img_list, dim=1)
+        return emb
+
+
 
 
 # MART model
@@ -787,7 +811,7 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
-        self.cfg.vocab_size = 252
+        self.cfg.vocab_size = 130
         self.z_f = torch.randn(1, requires_grad=True).cuda()
         self.z_p = torch.randn(1, requires_grad=True).cuda()
         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
@@ -810,8 +834,8 @@ class RecursiveTransformer(nn.Module):
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
-        self.size_adjust = nn.Linear(512, 384)
-        self.upsampling = nn.Linear(384, 512)
+        # self.size_adjust = nn.Linear(512, 384)
+        # self.upsampling = nn.Linear(384, 512)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
@@ -847,17 +871,17 @@ class RecursiveTransformer(nn.Module):
             module.bias.data.zero_()
 
     def forward_step(
-        self, input_ids, image_features, text, input_masks, token_type_ids, gt_clip=None
+        self, input_ids, image_features, input_masks, token_type_ids, gt_clip=None
     ):
         """
         single step forward in the recursive structure
         """
         # video_features = self.size_adjust(video_features)
-        image_features = self.cnn(image_features) # CNNで6×768にする
+        image_features = self.cnn(image_features) # CNNで6×384にする
         #image_featuresに[SEP]トークンを結合
-        zeros = torch.zeros(1, 768)
-        image_features = torch.cat((image_features, zeros), dim=1)
-        features = torch.cat((image_features, text), dim=1)
+        # zeros = torch.zeros(1, 384)
+        # image_features = torch.cat((image_features, zeros), dim=1)
+        # features = torch.cat((image_features, text), dim=1)
         self.future_rec = []
         self.future_gt = []
         # if gt_clip is None:
@@ -876,15 +900,14 @@ class RecursiveTransformer(nn.Module):
         # tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
         # past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
         # clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
-        clip_feats = features[0:5]
 
         # clip_feats = self.ff(clip_feats)
 
         # Time Series Module
-        _, clip_feats = self.TSModule(clip_feats)
+        _, clip_feats = self.TSModule(image_features)
 
         embeddings = self.embeddings(
-            input_ids, image_features, text, token_type_ids
+            input_ids, image_features, token_type_ids
         )  # (N, L, D)
         # clip_his = torch.zeros((embeddings.shape)).cuda()
         # clip_his = clip_his + ts_feats
@@ -924,7 +947,7 @@ class RecursiveTransformer(nn.Module):
         Returns:
         new args:
             image[6, 3, 128, 128]
-            txt[22, 768]
+            txt[22, 384]
             input_mask_list,
             gt_image [1, 3, 128, 128]
 

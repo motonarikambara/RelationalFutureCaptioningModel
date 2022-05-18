@@ -45,12 +45,12 @@ def make_dict(train_caption_file, word2idx_filepath):
         word_list = nltk.tokenize.word_tokenize(sent)
         max_words = max(max_words, len(word_list))
         words.extend(word_list)
-    
+
     # default dict
     word2idx_dict =\
         {"[PAD]": 0, "[CLS]": 1, "[SEP]": 2, "[VID]": 3, "[BOS]": 4, "[EOS]": 5, "[UNK]": 6}
     word_idx = 7
-    
+
     # 辞書の作成
     for word in words:
         if word not in word2idx_dict:
@@ -60,7 +60,7 @@ def make_dict(train_caption_file, word2idx_filepath):
     # 辞書ファイルの作成
     with open(word2idx_filepath, "w") as f:
         json.dump(word2idx_dict, f, indent=0)
-    
+
     return max_words
 
 
@@ -186,7 +186,7 @@ class RecursiveCaptionDataset(data.Dataset):
     def __getitem__(self, index):
         items, meta = self.convert_example_to_features(self.data[index])
         return items, meta
-    
+
     def _load_bila_images(self, raw_name: str, num_images=5):
         """
         画像を読み込んでくる
@@ -198,11 +198,11 @@ class RecursiveCaptionDataset(data.Dataset):
                 future image with shape (128, 128, 3)
         """
         # 動画に関する特徴量を取得
-        # 
+        #
         file_n = os.path.join(".", "ponnet_data", "frames", "_"  + raw_name)
-        future_feat_n = os.path.join(".", "ponnet_data", "future_emb_feats")
+        future_feat_n = os.path.join(".", "ponnet_data", "future_frames")
         image_feats = []
-        for idx in num_images:
+        for idx in range(num_images):
             file_name = "frame_" + str(idx) + ".png"
             img = cv2.imread(os.path.join(file_n, file_name))
             image_feats.append(img)
