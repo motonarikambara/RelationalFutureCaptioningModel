@@ -23,7 +23,7 @@ from nntrainer.utils_torch import count_parameters
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-ACTION_WEIGHT = {7: 636, 9: 133}
+ACTION_WEIGHT = {111: 131, 94: 628}
 
 # # default infinity (cfg.inf = 0), works with fp32. this can lead to NaN values in some circumstances
 INF = float("inf")
