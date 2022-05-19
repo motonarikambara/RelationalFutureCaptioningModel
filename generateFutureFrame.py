@@ -1,10 +1,10 @@
 import cv2
 from os import makedirs
-import os
 from os.path import splitext, dirname, basename, join
 import csv
 import subprocess
 from tqdm import tqdm
+import os
 
 
 def save_frames(video_path: str, frame_dir: str,
@@ -12,14 +12,19 @@ def save_frames(video_path: str, frame_dir: str,
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return
-    v_name = splitext(basename(video_path))[0]
+    # v_name = splitext(basename(video_path))[0]
     # if frame_dir[-1:] == "\\" or frame_dir[-1:] == "/":
     #     frame_dir = dirname(frame_dir)
     # frame_dir_ = join(frame_dir, v_name)
 
 
-    # makedirs(frame_dir_, exist_ok=True)
-    # base_path = join(frame_dir_, name)
+    v_name = splitext(basename(video_path))[0]
+    # if frame_dir[-1:] == "\\" or frame_dir[-1:] == "/":
+    #     frame_dir = dirname(frame_dir)
+
+    # makedirs(frame_dir, exist_ok=True)
+    # base_path = join(frame_dir, name)
+    base_path = frame_dir
 
     idx = 0
     while cap.isOpened():
@@ -29,24 +34,19 @@ def save_frames(video_path: str, frame_dir: str,
             if cap.get(cv2.CAP_PROP_POS_FRAMES) == 1:  # 0秒のフレームを保存
                 # cv2.imwrite("{}_{}.{}".format(base_path, "0", ext),
                 #             frame)
-                continue
+                print("Hello World!")
             elif idx < cap.get(cv2.CAP_PROP_FPS):
                 continue
             else:  # 1秒ずつフレームを保存
                 second = int(cap.get(cv2.CAP_PROP_POS_FRAMES)/idx)
-                # filled_second = str(second - 5)
-                if second <= 4:
-                    continue
-                # if second > 6:
-                #     break
-                # cv2.imwrite("{}_{}.{}".format(base_path, filled_second, ext),
-                #             frame)
-                if second == 5:
-                    cv2.imwrite(os.path.join(frame_dir, "{}.{}".format(file_name, ext)), frame)
-                    idx = 0
-                    print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-                elif second > 6:
+                # filled_second = str(second)
+                if second > 6:
                     break
+                if second == 5:
+                    # cv2.imwrite("{}_{}.{}".format(base_path, filled_second, ext),
+                    #             frame)
+                    cv2.imwrite(os.path.join(base_path, "{}.{}".format(file_name, ext)), frame)
+                idx = 0
         else:
             break
 

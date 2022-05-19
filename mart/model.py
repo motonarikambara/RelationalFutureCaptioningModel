@@ -6,12 +6,14 @@ import logging
 import math
 from pathlib import Path
 import sys
+from tkinter import TRUE
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.tensorboard.summary import video
 import torch.nn.utils.rnn as rnn
+import torchvision.models as models
 
 from mart.configs_mart import MartConfig, MartPathConst
 from mart.masked_transformer import MTransformer
@@ -772,28 +774,68 @@ class TimeSeriesMoudule(nn.Module):
         return ts_feats, tmp_feats
 
 
-class SubLayer(nn.Module):
+# class SubLayer(nn.Module):
+#     def __init__(self):
+#         super(SubLayer, self).__init__()
+
+#         self.conv1 = nn.Conv2d(3, 16, 2, stride=2) # (360, 640)
+#         self.conv2 = nn.Conv2d(16, 32, 4, stride=4) # (90, 160)
+#         self.conv3 = nn.Conv2d(32, 64, (3, 4), stride=(3, 4)) # (30, 40)
+#         self.conv4 = nn.Conv2d(64, 128, 5, stride=5) # (6, 8)
+#         self.conv5 = nn.Conv2d(128, 1024, (6, 8)) # (1, 1)
+#         self.fc1 = nn.Linear(1024, 768)
+
+
+#     def forward(self, x):
+#         x = F.relu(self.conv1(x))
+#         x = F.relu(self.conv2(x))
+#         x = F.relu(self.conv3(x))
+#         x = F.relu(self.conv4(x))
+#         x = F.relu(self.conv5(x))
+
+#         # x = x.view(-1, 1, 1024)
+#         x = torch.reshape(x,(-1, 1, 1024))
+#         x  = self.fc1(x)
+
+#         return x
+
+
+class SubLayerF(nn.Module):
     def __init__(self):
-        super(SubLayer, self).__init__()
+        super(SubLayerF, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 16, 2, stride=2) # (360, 640)
-        self.conv2 = nn.Conv2d(16, 32, 4, stride=4) # (90, 160)
-        self.conv3 = nn.Conv2d(32, 64, (3, 4), stride=(3, 4)) # (30, 40)
-        self.conv4 = nn.Conv2d(64, 128, 5, stride=5) # (6, 8)
-        self.conv5 = nn.Conv2d(128, 1024, (6, 8)) # (1, 1)
-        self.fc1 = nn.Linear(1024, 768)
-
+        self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
+        self.resnet = models.resnet50(pretrained=False)
+        self.resnet.fc = torch.nn.Linear(self.resnet.fc.in_features, 768)
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-        x = F.relu(self.conv5(x))
+        x = self.conv1(x)
+        x = self.resnet(x)
 
-        # x = x.view(-1, 1, 1024)
-        x = torch.reshape(x,(-1, 1, 1024))
-        x  = self.fc1(x)
+        x = torch.reshape(x,(-1, 1, 768))
+
+        return x
+
+
+class SubLayerT(nn.Module):
+    def __init__(self):
+        super(SubLayerT, self).__init__()
+
+        self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
+        self.resnet = models.resnet50(pretrained=True)
+        self.fc1 = nn.Linear(512, 768)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.resnet.conv1(x)
+        x = self.resnet.bn1(x)
+        x = self.resnet.relu(x)
+        x = self.resnet.maxpool(x)
+        x = self.resnet.layer1(x)
+        x = self.resnet.layer2(x) # (b, 512, 23, 40)
+        x = F.adaptive_avg_pool2d(x, (1, 1)) # (b, 512, 1, 1)
+        x = torch.reshape(x,(-1, 1, 512))
+        x = self.fc1(x)
 
         return x
 
@@ -802,7 +844,8 @@ class CNNLayer(nn.Module):
     def __init__(self):
         super(CNNLayer, self).__init__()
 
-        layer = SubLayer()
+        # layer = SubLayerF()
+        layer = SubLayerT()
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(6)])
 
     def forward(self, x):
