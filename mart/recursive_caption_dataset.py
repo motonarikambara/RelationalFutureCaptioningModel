@@ -208,7 +208,10 @@ class RecursiveCaptionDataset(data.Dataset):
             file_name = os.path.join(file_n, "frame_" + str(idx) + ".pkl")
             with open(file_name, "rb") as f:
                 feat = pickle.load(f)
+                # print("feat", feat.shape)
             image_feats.append(feat)
+            # print([len(v) for v in image_feats])
+        # print(image_feats[-1].shape)
         image_feats.append(image_feats[-1])
         image_feats = np.array(image_feats)
         file_name_future = os.path.join(future_feat_n, raw_name + ".pkl")

@@ -58,6 +58,10 @@ def save_frames(video_path: str, frame_dir: str,
             if cap.get(cv2.CAP_PROP_POS_FRAMES) == 1:  # 0秒のフレームを保存
                 # cv2.imwrite("{}_{}.{}".format(base_path, "0", ext),
                 #             frame)
+                frame = torch.from_numpy(frame.astype(np.float32)).clone()
+                frame = torch.reshape(frame, (1, 3, 720, 1280))
+                frame = net(frame)
+                frame = frame.to('cpu').detach().numpy().copy()
                 with open("{}_{}.{}".format(base_path, '0', ext), "wb") as f:
                     pickle.dump(frame, f)
             elif idx < cap.get(cv2.CAP_PROP_FPS):
