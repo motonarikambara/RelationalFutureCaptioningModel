@@ -799,7 +799,7 @@ class SubLayerT(nn.Module):
         self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
         self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
-    def forward(self, hidden_states, input_tensor):
+    def forward(self, hidden_states):
         hidden_states = self.dense_f(hidden_states) #(batch_size, 1, 768)
         hidden_states = F.relu(hidden_states)
         hidden_states = self.dense_s(hidden_states)
