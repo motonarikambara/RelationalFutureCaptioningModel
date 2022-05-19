@@ -774,32 +774,6 @@ class TimeSeriesMoudule(nn.Module):
         return ts_feats, tmp_feats
 
 
-# class SubLayer(nn.Module):
-#     def __init__(self):
-#         super(SubLayer, self).__init__()
-
-#         self.conv1 = nn.Conv2d(3, 16, 2, stride=2) # (360, 640)
-#         self.conv2 = nn.Conv2d(16, 32, 4, stride=4) # (90, 160)
-#         self.conv3 = nn.Conv2d(32, 64, (3, 4), stride=(3, 4)) # (30, 40)
-#         self.conv4 = nn.Conv2d(64, 128, 5, stride=5) # (6, 8)
-#         self.conv5 = nn.Conv2d(128, 1024, (6, 8)) # (1, 1)
-#         self.fc1 = nn.Linear(1024, 768)
-
-
-#     def forward(self, x):
-#         x = F.relu(self.conv1(x))
-#         x = F.relu(self.conv2(x))
-#         x = F.relu(self.conv3(x))
-#         x = F.relu(self.conv4(x))
-#         x = F.relu(self.conv5(x))
-
-#         # x = x.view(-1, 1, 1024)
-#         x = torch.reshape(x,(-1, 1, 1024))
-#         x  = self.fc1(x)
-
-#         return x
-
-
 class SubLayerF(nn.Module):
     def __init__(self):
         super(SubLayerF, self).__init__()
@@ -818,46 +792,35 @@ class SubLayerF(nn.Module):
 
 
 class SubLayerT(nn.Module):
-    def __init__(self):
-        super(SubLayerT, self).__init__()
+    def __init__(self, cfg):
+        super().__init__()
+        self.dense_f = nn.Linear(512, cfg.intermediate_size)
+        self.dense_s = nn.Linear(cfg.intermediate_size, cfg.hidden_size)
+        self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.dropout = nn.Dropout(cfg.hidden_dropout_prob)
 
-        self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
-        self.resnet = models.resnet50(pretrained=True)
-        self.fc1 = nn.Linear(512, 768)
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.resnet.conv1(x)
-        x = self.resnet.bn1(x)
-        x = self.resnet.relu(x)
-        x = self.resnet.maxpool(x)
-        x = self.resnet.layer1(x)
-        x = self.resnet.layer2(x) # (b, 512, 23, 40)
-        x = F.adaptive_avg_pool2d(x, (1, 1)) # (b, 512, 1, 1)
-        x = torch.reshape(x,(-1, 1, 512))
-        x = self.fc1(x)
-
-        return x
+    def forward(self, hidden_states, input_tensor):
+        hidden_states = self.dense_f(hidden_states) #(batch_size, 1, 768)
+        hidden_states = F.relu(hidden_states)
+        hidden_states = self.dense_s(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states)
+        return hidden_states
 
 
-class CNNLayer(nn.Module):
-    def __init__(self):
-        super(CNNLayer, self).__init__()
+class PreproLayer(nn.Module):
+    def __init__(self, cfg):
+        super(PreproLayer, self).__init__()
 
-        # layer = SubLayerF()
-        layer = SubLayerT()
+        layer = SubLayerT(cfg)
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(6)])
 
     def forward(self, x):
-        x = x.permute(0, 1, 4, 2, 3)
         feature_img_list = []
         for idx in range(6):
-            # print("x :", x[:, idx, :, :, :].shape)
-            _x = self.layer[idx](x[:, idx, :, :, :])
+            _x = self.layer[idx](x[:, idx, :])
             feature_img_list.append(_x)
-            # print("_x:", _x.shape)
         emb = torch.cat(feature_img_list, dim=1)
-        # print("emb:", emb.shape)
         return emb
 
 
@@ -896,10 +859,10 @@ class RecursiveTransformer(nn.Module):
         self.extend = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
-            nn.Linear(input_size * 2, input_size * 5),
+            nn.Linear(input_size * 2, input_size),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(input_size * 5, 49152),
+            nn.Linear(input_size, 512),
         )
         self.ff = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
@@ -916,7 +879,7 @@ class RecursiveTransformer(nn.Module):
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
 
-        self.cnn = CNNLayer()
+        self.mlp = PreproLayer(cfg)
 
     def init_bert_weights(self, module):
         """
@@ -940,7 +903,7 @@ class RecursiveTransformer(nn.Module):
         single step forward in the recursive structure
         """
         # video_features = self.size_adjust(video_features)
-        image_features = self.cnn(image_features) # CNNで6×768にする
+        image_features = self.mlp(image_features) # CNNで6×768にする
         #image_featuresに[SEP]トークンを結合
         self.future_rec = []
         self.future_gt = []
@@ -950,7 +913,7 @@ class RecursiveTransformer(nn.Module):
         future_b = self.pred_f(future_b)
         image_features[:, 5, :] = future_b
         future_b = self.extend(future_b)
-        future_b = future_b.reshape((-1, 128, 128, 3))
+        future_b = future_b.reshape((-1, 1, 512))
 
         # Time Series Module
         # print("_img_feature :", image_features.shape)

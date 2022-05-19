@@ -1,6 +1,7 @@
 """
 Captioning dataset.
 """
+from cmath import pi
 import copy
 import json
 import math
@@ -18,6 +19,7 @@ from torch.utils.data.dataloader import default_collate
 from tqdm import tqdm
 import sys
 import cv2
+import pickle
 
 from mart.configs_mart import MartConfig, MartPathConst
 from nntrainer.typext import ConstantHolder
@@ -203,16 +205,14 @@ class RecursiveCaptionDataset(data.Dataset):
         future_feat_n = os.path.join(".", "ponnet_data", "future_frames")
         image_feats = []
         for idx in range(num_images):
-            file_name = "frame_" + str(idx) + ".png"
-            img = cv2.imread(os.path.join(file_n, file_name))
-            image_feats.append(img)
+            file_name = "frame_" + str(idx) + ".pkl"
+            feat = pickle.load(os.path.join(file_n, file_name))
+            image_feats.append(feat)
         image_feats.append(image_feats[-1])
         image_feats = np.array(image_feats)
-        future_image = cv2.imread(os.path.join(future_feat_n, raw_name + ".png"))
-        # print(os.path.join(future_feat_n, raw_name + ".png"))
-        future_image = cv2.resize(future_image, dsize=(128, 128))
+        future_feat = pickle.load(os.path.join(future_feat_n, raw_name + ".pkl"))
 
-        return image_feats, future_image
+        return image_feats, future_feat
 
 
     def convert_example_to_features(self, example):
