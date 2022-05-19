@@ -1051,18 +1051,18 @@ class RecursiveTransformer(nn.Module):
                     action_loss += (1 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
                 else:
                     action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
-            # cont_loss = 0.0
-            # tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
-            # tmp_idx_list = input_labels_list[idx].view(-1)
-            # for i in range(1, len(tmp_pred_score_list)):
-            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-            # for i in range(0, len(tmp_pred_score_list) - 1):
-            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            cont_loss = 0.0
+            tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
+            tmp_idx_list = input_labels_list[idx].view(-1)
+            for i in range(1, len(tmp_pred_score_list)):
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            for i in range(0, len(tmp_pred_score_list) - 1):
+                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
 
-            caption_loss += 0.9 * snt_loss + 0.00001 * fut_loss + 0.1 * action_loss
-            # caption_loss += 0.9 * snt_loss + 0.00001 * fut_loss + (1 / cont_loss) + action_loss
+            # caption_loss += 0.9 * snt_loss + 0.00001 * fut_loss + 0.1 * action_loss
+            caption_loss += 0.9 * snt_loss + 0.00001 * fut_loss + (1 / cont_loss) + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
