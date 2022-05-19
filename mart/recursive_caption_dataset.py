@@ -201,16 +201,19 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         # 動画に関する特徴量を取得
         #
-        file_n = os.path.join(".", "ponnet_data", "frames", "_"  + raw_name)
-        future_feat_n = os.path.join(".", "ponnet_data", "future_frames")
+        file_n = os.path.join(".", "ponnet_data", "frames_pkl", "_"  + raw_name)
+        future_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl")
         image_feats = []
         for idx in range(num_images):
-            file_name = "frame_" + str(idx) + ".pkl"
-            feat = pickle.load(os.path.join(file_n, file_name))
+            file_name = os.path.join(file_n, "frame_" + str(idx) + ".pkl")
+            with open(file_name, "rb") as f:
+                feat = pickle.load(f)
             image_feats.append(feat)
         image_feats.append(image_feats[-1])
         image_feats = np.array(image_feats)
-        future_feat = pickle.load(os.path.join(future_feat_n, raw_name + ".pkl"))
+        file_name_future = os.path.join(future_feat_n, raw_name + ".pkl")
+        with open(file_name_future, "rb") as f:
+            future_feat = pickle.load(f)
 
         return image_feats, future_feat
 

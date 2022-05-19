@@ -71,6 +71,7 @@ def save_frames(video_path: str, frame_dir: str,
                 frame = torch.from_numpy(frame.astype(np.float32)).clone()
                 frame = torch.reshape(frame, (1, 3, 720, 1280))
                 frame = net(frame)
+                frame = frame.to('cpu').detach().numpy().copy()
                 with open("{}_{}.{}".format(base_path, second, ext), "wb") as f:
                     pickle.dump(frame, f)
                 idx = 0
