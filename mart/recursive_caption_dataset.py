@@ -113,8 +113,8 @@ class RecursiveCaptionDataset(data.Dataset):
 
         # 系列長を決定
         # [video;text]
-        self.max_seq_len = max_v_len + 2 + max_t_len
-        self.max_v_len = max_v_len + 2
+        self.max_seq_len = max_v_len  + max_t_len
+        self.max_v_len = max_v_len
         self.max_t_len = max_t_len  # sen
         self.max_n_sen = max_n_sen
 

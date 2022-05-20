@@ -165,7 +165,7 @@ class Translator(object):
                     input_masks_list[idx],
                     token_type_ids_list[idx],
                     rt_model,
-                    config.max_v_len + 2,
+                    config.max_v_len,
                     config.max_t_len,
                 )
                 dec_seq_list.append(dec_seq)

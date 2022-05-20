@@ -389,7 +389,7 @@ class LayerWoMemory(nn.Module):
         max_v_len, max_t_len = self.cfg.max_v_len, self.cfg.max_t_len
         # self-attention, need to shift right
         shifted_self_mask = make_pad_shifted_mask(
-            attention_mask, max_v_len + 2, max_t_len
+            attention_mask, max_v_len, max_t_len
         )  # (N, L, L)
         attention_output = self.attention(hidden_states, shifted_self_mask, clip_feats)
         intermediate_output = self.hidden_intermediate(attention_output)
@@ -442,7 +442,7 @@ class DecoderLayer(nn.Module):
         max_v_len, max_t_len = self.cfg.max_v_len, self.cfg.max_t_len
         # self-attention, need to shift right
         shifted_self_mask = make_pad_shifted_mask(
-            attention_mask, max_v_len + 2, max_t_len, decoder=True
+            attention_mask, max_v_len, max_t_len, decoder=True
         )  # (N, L, L)
         # shifted_self_mask = None
         att = self.attention(x, shifted_self_mask, clip_his)
@@ -587,9 +587,10 @@ class EmbeddingsWithVideo(nn.Module):
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
         words_embeddings += token_type_embeddings
 
-        zeros = torch.zeros(video_embeddings.size()[0], 1, 384)
+        zeros = torch.zeros(video_embeddings.size()[0], 22, 384)
         zeros = zeros.cuda()
-        embeddings = torch.cat((zeros, video_embeddings, zeros, words_embeddings[:, 8:, :]), dim=1) + token_type_embeddings
+        video_embeddings = torch.cat((video_embeddings, zeros), dim=1)
+        embeddings =  words_embeddings + video_embeddings + token_type_embeddings
         # embeddings = words_embeddings + video_embeddings + token_type_embeddings
 
         if self.add_postion_embeddings:
@@ -977,6 +978,7 @@ class RecursiveTransformer(nn.Module):
             decoded_layer_outputs[-1]
         )  # (N, L, vocab_size)
         # future_b = self.upsampling(future_b)
+        # print(prediction_scores.shape)
         return encoded_layer_outputs, prediction_scores, future_b
         # return encoded_layer_outputs, prediction_scores
 
@@ -1027,7 +1029,7 @@ class RecursiveTransformer(nn.Module):
                 future_rec.append(pred_future)
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
-                action_score.append(prediction_scores[:, 8, :])
+                action_score.append(prediction_scores[:, 6, :])
         else:
             for idx in range(step_size):
                 encoded_layer_outputs, prediction_scores = self.forward_step(
@@ -1038,7 +1040,7 @@ class RecursiveTransformer(nn.Module):
                 )
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
-                action_score.append(prediction_scores[:, 8, :])
+                action_score.append(prediction_scores[:, 6, :])
         # compute loss, get predicted words
         caption_loss = 0.0
         for idx in range(step_size):
@@ -1046,7 +1048,7 @@ class RecursiveTransformer(nn.Module):
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
             )
-            gt_action_list = input_labels_list[idx][:, 8]
+            gt_action_list = input_labels_list[idx][:, 6]
             # print(prediction_scores_list[idx])
             act_score_list = action_score[idx].cpu()
             action_loss = 0.0
