@@ -17,7 +17,8 @@ class SubLayerT(nn.Module):
         super(SubLayerT, self).__init__()
 
         self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
-        self.resnet = models.resnet50(pretrained=True)
+        # self.resnet = models.resnet50(pretrained=True)
+        self.resnet = models.resnet100(pretrained=True)
         self.fc1 = nn.Linear(512, 768)
 
     def forward(self, x):
