@@ -14,6 +14,7 @@ from torch import nn
 from torch.utils.tensorboard.summary import video
 import torch.nn.utils.rnn as rnn
 import torchvision.models as models
+from torchsummary import summary
 
 from mart.configs_mart import MartConfig, MartPathConst
 from mart.masked_transformer import MTransformer
@@ -322,6 +323,7 @@ def make_shifted_mask(input_mask, max_v_len, max_t_len, memory_len=0, decoder=Fa
     )
     if decoder:
         shifted_mask = torch.ones(shifted_mask.size())
+    # print(shifted_mask)
     return shifted_mask
 
 
@@ -442,13 +444,14 @@ class DecoderLayer(nn.Module):
         shifted_self_mask = make_pad_shifted_mask(
             attention_mask, max_v_len + 2, max_t_len, decoder=True
         )  # (N, L, L)
+        # shifted_self_mask = None
         att = self.attention(x, shifted_self_mask, clip_his)
         layer_output = self.output(att, att)  # (N, L, D)
         return layer_output
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg, num_hidden_layers=5):
+    def __init__(self, cfg, num_hidden_layers=2):
         super().__init__()
         self.layer = nn.ModuleList(
             [DecoderLayer(cfg) for _ in range(num_hidden_layers)]
@@ -527,7 +530,7 @@ class EmbeddingsWithVideo(nn.Module):
         """
         add_postion_embeddings: whether to add absolute positional embeddings
         """
-        cfg.video_feature_size = 768
+        cfg.video_feature_size = 384
         self.add_postion_embeddings = add_postion_embeddings
         self.word_embeddings = nn.Embedding(
             cfg.vocab_size, cfg.word_vec_size, padding_idx=0
@@ -584,7 +587,7 @@ class EmbeddingsWithVideo(nn.Module):
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
         words_embeddings += token_type_embeddings
 
-        zeros = torch.zeros(video_embeddings.size()[0], 1, 768)
+        zeros = torch.zeros(video_embeddings.size()[0], 1, 384)
         zeros = zeros.cuda()
         embeddings = torch.cat((zeros, video_embeddings, zeros, words_embeddings[:, 8:, :]), dim=1) + token_type_embeddings
         # embeddings = words_embeddings + video_embeddings + token_type_embeddings
@@ -603,6 +606,7 @@ class PredictionHeadTransform(nn.Module):
         self.dense = nn.Linear(cfg.hidden_size, cfg.hidden_size)
         self.gelu = nn.GELU()
         self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
+        self.dense2 = nn.Linear(cfg.hidden_size, cfg.hidden_size)
 
     def forward(self, hidden_states):
         """
@@ -659,7 +663,7 @@ class RelationalSelfAttention(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.m = m
-        self.hidden_size = 768
+        self.hidden_size = 384
         self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
         self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
@@ -753,14 +757,14 @@ class TimeSeriesMoudule(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.cfg.hidden_size = 768
-        self.hidden_size = 768
+        self.cfg.hidden_size = 384
+        self.hidden_size = 384
         self.TSEncoder = TimeSeriesEncoder(self.cfg)
-        self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
+        # self.expand = nn.Linear(self.cfg.hidden_size, self.hidden_size)
         self.layernorm = nn.LayerNorm(self.hidden_size)
-        self.cfg.hidden_size = 768
+        self.cfg.hidden_size = 384
         self.z = torch.randn(1, requires_grad=True).cuda()
-        self.pe = PositionEncoding(n_filters=768)
+        self.pe = PositionEncoding(n_filters=384)
 
     def forward(self, x):
         x = self.pe(x)
@@ -768,7 +772,7 @@ class TimeSeriesMoudule(nn.Module):
         # print("TSM :", ts_feats.shape)
         ts_feats = self.TSEncoder(ts_feats)
         ts_feats = self.z * x + (1 - self.z) * ts_feats
-        ts_feats = self.expand(ts_feats)
+        # ts_feats = self.expand(ts_feats)
         tmp_feats = ts_feats[:, 4, :].reshape((-1, 1, self.hidden_size))
         tmp_feats = self.layernorm(tmp_feats)
         return ts_feats, tmp_feats
@@ -783,7 +787,7 @@ class TimeSeriesMoudule(nn.Module):
 #         self.conv3 = nn.Conv2d(32, 64, (3, 4), stride=(3, 4)) # (30, 40)
 #         self.conv4 = nn.Conv2d(64, 128, 5, stride=5) # (6, 8)
 #         self.conv5 = nn.Conv2d(128, 1024, (6, 8)) # (1, 1)
-#         self.fc1 = nn.Linear(1024, 768)
+#         self.fc1 = nn.Linear(1024, 384)
 
 
 #     def forward(self, x):
@@ -800,33 +804,33 @@ class TimeSeriesMoudule(nn.Module):
 #         return x
 
 
-class SubLayerF(nn.Module):
-    def __init__(self):
-        super(SubLayerF, self).__init__()
+# class SubLayerF(nn.Module):
+#     def __init__(self):
+#         super(SubLayerF, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
-        self.resnet = models.resnet50(pretrained=False)
-        self.resnet.fc = torch.nn.Linear(self.resnet.fc.in_features, 768)
+#         self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
+#         self.resnet = models.resnet50(pretrained=False)
+#         self.resnet.fc = torch.nn.Linear(self.resnet.fc.in_features, 384)
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.resnet(x)
+#     def forward(self, x):
+#         x = self.conv1(x)
+#         x = self.resnet(x)
 
-        x = torch.reshape(x,(-1, 1, 768))
+#         x = torch.reshape(x,(-1, 1, 384))
 
-        return x
+#         return x
 
 
 class SubLayerT(nn.Module):
     def __init__(self):
         super(SubLayerT, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
-        self.resnet = models.resnet50(pretrained=True)
-        self.fc1 = nn.Linear(512, 768)
+        # self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
+        self.resnet = models.resnet18(pretrained=True)
+        self.fc1 = nn.Linear(128, 384)
 
     def forward(self, x):
-        x = self.conv1(x)
+        # x = self.conv1(x)
         x = self.resnet.conv1(x)
         x = self.resnet.bn1(x)
         x = self.resnet.relu(x)
@@ -834,7 +838,7 @@ class SubLayerT(nn.Module):
         x = self.resnet.layer1(x)
         x = self.resnet.layer2(x) # (b, 512, 23, 40)
         x = F.adaptive_avg_pool2d(x, (1, 1)) # (b, 512, 1, 1)
-        x = torch.reshape(x,(-1, 1, 512))
+        x = torch.reshape(x,(-1, 1, 128))
         x = self.fc1(x)
 
         return x
@@ -846,6 +850,7 @@ class CNNLayer(nn.Module):
 
         # layer = SubLayerF()
         self.layer = SubLayerT()
+
         # self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(6)])
 
     def forward(self, x):
@@ -890,9 +895,9 @@ class RecursiveTransformer(nn.Module):
         self.contloss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
-        input_size = 768
-        # self.size_adjust = nn.Linear(512, 768)
-        # self.upsampling = nn.Linear(768, 512)
+        input_size = 384
+        # self.size_adjust = nn.Linear(512, 384)
+        # self.upsampling = nn.Linear(384, 512)
         self.extend = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
@@ -940,7 +945,7 @@ class RecursiveTransformer(nn.Module):
         single step forward in the recursive structure
         """
         # video_features = self.size_adjust(video_features)
-        image_features = self.cnn(image_features) # CNNで6×768にする
+        image_features = self.cnn(image_features) # CNNで6×384にする
         #image_featuresに[SEP]トークンを結合
         self.future_rec = []
         self.future_gt = []
@@ -952,9 +957,11 @@ class RecursiveTransformer(nn.Module):
         future_b = self.extend(future_b)
         future_b = future_b.reshape((-1, 128, 128, 3))
 
+        rsa_feats= image_features.clone()
+
         # Time Series Module
         # print("_img_feature :", image_features.shape)
-        _, clip_feats = self.TSModule(image_features)
+        _, clip_feats = self.TSModule(rsa_feats)
 
         embeddings = self.embeddings(
             input_ids, image_features, token_type_ids
@@ -996,7 +1003,7 @@ class RecursiveTransformer(nn.Module):
         Returns:
         new args:
             image[6, 3, 128, 128]
-            txt[22, 768]
+            txt[22, 384]
             input_mask_list,
             gt_image [1, 3, 128, 128]
 
@@ -1020,7 +1027,7 @@ class RecursiveTransformer(nn.Module):
                 future_rec.append(pred_future)
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
-                action_score.append(prediction_scores[:, 3, :])
+                action_score.append(prediction_scores[:, 8, :])
         else:
             for idx in range(step_size):
                 encoded_layer_outputs, prediction_scores = self.forward_step(
@@ -1031,7 +1038,7 @@ class RecursiveTransformer(nn.Module):
                 )
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
-                action_score.append(prediction_scores[:, 3, :])
+                action_score.append(prediction_scores[:, 8, :])
         # compute loss, get predicted words
         caption_loss = 0.0
         for idx in range(step_size):
@@ -1039,18 +1046,20 @@ class RecursiveTransformer(nn.Module):
                 prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
                 input_labels_list[idx].view(-1),
             )
-            gt_action_list = input_labels_list[idx][:, 3]
+            gt_action_list = input_labels_list[idx][:, 8]
+            # print(prediction_scores_list[idx])
             act_score_list = action_score[idx].cpu()
             action_loss = 0.0
             for actidx in range(len(gt_action_list)):
                 gt_action = torch.tensor([gt_action_list[actidx]], dtype=int)
                 gt_idx = gt_action.tolist()
+                # print(gt_idx)
                 if gt_idx[0] == -1:
                     continue
                 if gt_idx[0] in ACTION_WEIGHT:
-                    action_loss += (1 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += (100 / ACTION_WEIGHT[gt_idx[0]]) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
                 else:
-                    action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
+                    action_loss += (100 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             # cont_loss = 0.0
             # tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
             # tmp_idx_list = input_labels_list[idx].view(-1)
@@ -1058,11 +1067,11 @@ class RecursiveTransformer(nn.Module):
             #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
             # for i in range(0, len(tmp_pred_score_list) - 1):
             #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
-            if gt_clip is not None:
-                fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
+            # if gt_clip is not None:
+            #     fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
 
 
-            caption_loss += 0.9 * snt_loss + 0.00001 * fut_loss + 0.1 * action_loss
+            caption_loss += snt_loss
             # caption_loss += 0.9 * snt_loss + 0.00001 * fut_loss + (1 / cont_loss) + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size

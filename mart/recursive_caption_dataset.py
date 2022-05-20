@@ -95,7 +95,7 @@ class RecursiveCaptionDataset(data.Dataset):
         recurrent=True,
         untied=False,
         video_feature_dir: Optional[str] = None,
-        coot_dim_vid=768,
+        coot_dim_vid=384,
         coot_dim_clip=384,
         annotations_dir: str = "annotations",
         preload: bool = False,
@@ -205,6 +205,7 @@ class RecursiveCaptionDataset(data.Dataset):
         for idx in range(num_images):
             file_name = "frame_" + str(idx) + ".png"
             img = cv2.imread(os.path.join(file_n, file_name))
+            img = cv2.resize(img, dsize=(224, 224))
             image_feats.append(img)
         image_feats.append(image_feats[-1])
         image_feats = np.array(image_feats)
@@ -516,7 +517,7 @@ def create_mart_datasets_and_loaders(
     )
     test_loader = data.DataLoader(
         test_dataset,
-        collate_fn=val_dataset.collate_fn,
+        collate_fn=test_dataset.collate_fn,
         batch_size=cfg.val.batch_size,
         shuffle=cfg.dataset_val.shuffle,
         num_workers=cfg.dataset_val.num_workers,
