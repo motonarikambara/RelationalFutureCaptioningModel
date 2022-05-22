@@ -17,6 +17,7 @@ from torch.utils import data
 from torch.utils.data.dataloader import default_collate
 from tqdm import tqdm
 import sys
+from torch import nn
 
 from mart.configs_mart import MartConfig, MartPathConst
 from nntrainer.typext import ConstantHolder
@@ -141,11 +142,11 @@ class RecursiveCaptionDataset(data.Dataset):
         # determine metadata file
         tmp_path = "ponnet"
         if mode == "train":  # 1333 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_train.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
         elif mode == "val":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_val.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_valid.json"
         elif mode == "test":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "captioning_test.json"
+            data_path = self.annotations_dir / tmp_path / "_captioning_test.json"
             mode = "val"
             self.mode = "val"
         else:
@@ -193,6 +194,8 @@ class RecursiveCaptionDataset(data.Dataset):
         )
 
         self.preloading_done = False
+        self.feature_check = []
+        self.future_feature_check = []
 
     def __len__(self):
         return len(self.data)
@@ -202,7 +205,7 @@ class RecursiveCaptionDataset(data.Dataset):
         return items, meta
 
     def _load_ponnet_video_feature(
-        self, raw_name: str
+        self, raw_name: str, num_images=5
     ) -> Tuple[np.array, np.array, List[np.array]]:
         """
         Load given S3D video features.
@@ -216,12 +219,42 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         # 動画に関する特徴量を取得
         feat_file = raw_name + ".pkl"
-        file_n = os.path.join(".", "ponnet_data", "emb_feats", feat_file)
-        all_feat_n = os.path.join(".", "ponnet_data", "future_emb_feats", feat_file)
+        file_n = os.path.join(".", "ponnet_data", "current_frames_pkl", feat_file)
+        all_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl", feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
         with open(all_feat_n, "rb") as f:
             all_emb_feat = pickle.load(f)
+        f = open('embfeat.txt', 'a')
+        f.write(str(emb_feat))
+        f.close()
+        f = open('allembfeat.txt', 'a')
+        f.write(str(all_emb_feat))
+        f.close()
+
+        # file_n = os.path.join(".", "ponnet_data", "frames_pkl", "_"  + raw_name)
+        # future_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl")
+        # emb_feat = []
+        # ln = nn.Linear(3072, 512)
+        # for idx in range(num_images):
+        #     file_name = os.path.join(file_n, "frame_" + str(idx) + ".pkl")
+        #     with open(file_name, "rb") as f:
+        #         feat = pickle.load(f)
+        #         # print("feat", feat.shape)
+        #     emb_feat.append(feat)
+        #     # print([len(v) for v in image_feats])
+        # # print(image_feats[-1].shape)
+        # emb_feat.append(emb_feat[-1])
+        # emb_feat = np.array(emb_feat)
+        # file_name_future = os.path.join(future_feat_n, raw_name + ".pkl")
+        # with open(file_name_future, "rb") as f:
+        #     all_emb_feat = pickle.load(f)
+        # emb_feat = torch.from_numpy(emb_feat.astype(np.float32)).clone()
+        # emb_feat = emb_feat.view(1, -1)
+        # emb_feat = ln(emb_feat)
+        # emb_feat = emb_feat.to('cpu').detach().numpy().copy()
+        # # print("emb_feat", emb_feat.shape)
+        # # print("all_emb_feat", all_emb_feat.shape)
         return emb_feat, all_emb_feat
 
     def convert_example_to_features(self, example):
