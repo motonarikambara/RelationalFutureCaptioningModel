@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 from typing import List, Optional, Tuple
+from cv2 import FileNode_NAMED
 
 import h5py
 import pickle
@@ -202,7 +203,7 @@ class RecursiveCaptionDataset(data.Dataset):
         # 動画に関する特徴量を取得
         #
         file_n = os.path.join(".", "ponnet_data", "res_frames", "_"  + raw_name)
-        future_feat_n = os.path.join(".", "ponnet_data", "center_future_frames")
+        future_feat_n = os.path.join(".", "ponnet_data", "center_future_frames_pkl")
         image_feats = []
         for idx in range(num_images):
             file_name = os.path.join(file_n, "frame_" + str(idx) + ".pkl")
@@ -214,12 +215,15 @@ class RecursiveCaptionDataset(data.Dataset):
         # print(image_feats[-1].shape)
         # image_feats.append(image_feats[-1])
         image_feats = np.array(image_feats)
-        file_name_future = os.path.join(future_feat_n, raw_name + ".png")
+        file_name_future = os.path.join(future_feat_n, raw_name + ".pkl")
         # cv2.imshow("gt", cv2.imread(file_name_future))
         # cv2.waitKey(1)
         # with open(file_name_future, "rb") as f:
         #     future_feat = pickle.load(f)
-        future_feat = cv2.imread(file_name_future)
+        # future_feat = cv2.imread(file_name_future)
+        with open(file_name_future, "rb") as f:
+            future_feat = pickle.load(f)
+        # future_feat = future_feat.to('cpu').detach().numpy().copy()
         # print(future_feat.shape)
         return image_feats, future_feat
 
