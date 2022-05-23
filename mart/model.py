@@ -713,7 +713,7 @@ class RelationalSelfAttention(nn.Module):
         x_q = x_q.reshape((-1, 1, self.m * self.hidden_size))
         kernel_r = torch.matmul(x_q, self.h).reshape(-1, 1, self.m)
         kernel = kernel_v + kernel_r
-        
+
         # relational context
         xg = value.clone()
         xg = torch.transpose(xg, 1, 2)
@@ -762,7 +762,7 @@ class CLIPloss(nn.Module):
         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
         self.norm_i = nn.LayerNorm(384)
         self.norm_t = nn.LayerNorm(384)
-    
+
     def forward(self, clip, text):
         text = torch.flatten(text, 1)
         text = self.w(text)
@@ -863,7 +863,7 @@ class RecursiveTransformer(nn.Module):
         vid_feats[:, 0, :] = past_feats.reshape((-1, 384))
         past_feats = self.z_p * tmp_feats + (1 - self.z_p) * past_feats
         clip_feats[:, 0, :] = past_feats.reshape((-1, 384))
-        
+
         video_features[:, 1:4, :] = vid_feats.clone()
         # Time Series Module
         ts_feats, ts_feat = self.TSModule(clip_feats)
