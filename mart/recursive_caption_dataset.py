@@ -45,12 +45,12 @@ def make_dict(train_caption_file, word2idx_filepath):
         word_list = nltk.tokenize.word_tokenize(sent)
         max_words = max(max_words, len(word_list))
         words.extend(word_list)
-    
+
     # default dict
     word2idx_dict =\
         {"[PAD]": 0, "[CLS]": 1, "[SEP]": 2, "[VID]": 3, "[BOS]": 4, "[EOS]": 5, "[UNK]": 6}
     word_idx = 7
-    
+
     # 辞書の作成
     for word in words:
         if word not in word2idx_dict:
@@ -60,7 +60,7 @@ def make_dict(train_caption_file, word2idx_filepath):
     # 辞書ファイルの作成
     with open(word2idx_filepath, "w") as f:
         json.dump(word2idx_dict, f, indent=0)
-    
+
     return max_words
 
 
@@ -142,11 +142,11 @@ class RecursiveCaptionDataset(data.Dataset):
         # determine metadata file
         tmp_path = "ponnet"
         if mode == "train":  # 1333 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
+            data_path = self.annotations_dir / tmp_path / "captioning_train.json"
         elif mode == "val":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_valid.json"
+            data_path = self.annotations_dir / tmp_path / "captioning_val.json"
         elif mode == "test":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_test.json"
+            data_path = self.annotations_dir / tmp_path / "captioning_test.json"
             mode = "val"
             self.mode = "val"
         else:
@@ -219,8 +219,8 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         # 動画に関する特徴量を取得
         feat_file = raw_name + ".pkl"
-        file_n = os.path.join(".", "ponnet_data", "current_frames_pkl", feat_file)
-        all_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl", feat_file)
+        file_n = os.path.join(".", "ponnet_data", "res_frames_pkl", feat_file)
+        all_feat_n = os.path.join(".", "ponnet_data", "center_future_frames_pkl", feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
         with open(all_feat_n, "rb") as f:

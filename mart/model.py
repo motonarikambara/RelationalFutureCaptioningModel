@@ -736,6 +736,37 @@ class TimeSeriesMoudule(nn.Module):
         return ts_feats, tmp_feats
 
 
+class CLIPloss(nn.Module):
+    """
+    CLIPで用いられているloss
+    https://cdn.openai.com/papers/Learning_Transferable_Visual_Models_From_Natural_Language_Supervision.pdf
+    """
+    def __init__(self):
+        super().__init__()
+        # self.w = nn.Linear(512, 384)
+        self.t = torch.randn(1, requires_grad=True).cuda()
+        self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
+        self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
+        self.norm_i = nn.LayerNorm(512)
+        self.norm_t = nn.LayerNorm(512)
+
+    def forward(self, rec, gt):
+        gt = torch.flatten(gt, 1)
+        # print("gt", gt.shape)
+        # gt = self.w(gt)
+        i_e = self.norm_i(rec)
+        t_e = self.norm_t(gt)
+        logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
+        # print(logits)
+        # sys.exit()
+        n = i_e.shape[0]
+        labels = torch.arange(n, device=torch.device("cuda"))
+        loss_i = self.i_loss(logits, labels)
+        loss_t = self.t_loss(logits, labels)
+        cliploss = (loss_i + loss_t) / 2
+        return cliploss
+
+
 # MART model
 class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
@@ -782,6 +813,7 @@ class RecursiveTransformer(nn.Module):
         )
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
+        self.cliploss = CLIPloss()
 
     def init_bert_weights(self, module):
         """
@@ -921,17 +953,18 @@ class RecursiveTransformer(nn.Module):
                 else:
                     action_loss += (1 / 300) * self.actionloss_func(act_score_list[actidx].view(-1, self.cfg.vocab_size), gt_action)
             cont_loss = 0.0
-            tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
-            tmp_idx_list = input_labels_list[idx].view(-1)
-            for i in range(1, len(tmp_pred_score_list)):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
-            for i in range(0, len(tmp_pred_score_list) - 1):
-                cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            # tmp_pred_score_list = prediction_scores_list[idx].view(-1, self.cfg.vocab_size)
+            # tmp_idx_list = input_labels_list[idx].view(-1)
+            # for i in range(1, len(tmp_pred_score_list)):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
+            # for i in range(0, len(tmp_pred_score_list) - 1):
+            #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
+            cont_loss += self.cliploss(future_rec[idx], future_gt[idx])
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
 
             # caption_loss += 0.9 * snt_loss
-            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss) + action_loss
+            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + 100 * cont_loss + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
