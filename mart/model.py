@@ -830,6 +830,38 @@ class SubLayerF(nn.Module):
 #         return emb
 
 
+class CLIPloss(nn.Module):
+    """
+    CLIPで用いられているloss
+    https://cdn.openai.com/papers/Learning_Transferable_Visual_Models_From_Natural_Language_Supervision.pdf
+    """
+    def __init__(self):
+        super().__init__()
+        self.w = nn.Linear(150528, 512)
+        self.t = torch.randn(1, requires_grad=True).cuda()
+        self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
+        self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
+        self.norm_i = nn.LayerNorm(512)
+        self.norm_t = nn.LayerNorm(512)
+
+    def forward(self, rec, gt):
+        gt = torch.flatten(gt, 1)
+        # print("gt", gt.shape)
+        # print("rec", rec.shape)
+        gt = self.w(gt)
+        rec = self.t(rec)
+        i_e = self.norm_i(rec)
+        t_e = self.norm_t(gt)
+        logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
+        # print(logits)
+        # sys.exit()
+        n = i_e.shape[0]
+        labels = torch.arange(n, device=torch.device("cuda"))
+        loss_i = self.i_loss(logits, labels)
+        loss_t = self.t_loss(logits, labels)
+        cliploss = (loss_i + loss_t) / 2
+        return cliploss
+
 
 
 # MART model
@@ -888,6 +920,7 @@ class RecursiveTransformer(nn.Module):
 
         # self.mlp = PreproLayer(cfg)
         self.mlp = nn.Linear(512, 768)
+        self.cliploss = CLIPloss()
 
     def init_bert_weights(self, module):
         """
@@ -1052,12 +1085,13 @@ class RecursiveTransformer(nn.Module):
                     cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "pred.png"), tmp_img)
                     cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "gt.png"), gt_img)
                     self.idx += 1
+                cont_loss += self.cliploss(future_rec[idx].reshape(-1, 150528), future_gt[idx])
             self.idx = 0
 
             # caption_loss += 0.9 * snt_loss + 0.000001 * fut_loss + 0.1 * action_loss
             # caption_loss += 0.9 * snt_loss + fut_loss + 0.1 * action_loss
-            caption_loss = fut_loss
-            # caption_loss += 0.9 * snt_loss + 100 * fut_loss + (100 / cont_loss) + action_loss
+            # caption_loss = fut_loss
+            caption_loss += 0.9 * snt_loss + 0.0001 * fut_loss + 100 * cont_loss + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
