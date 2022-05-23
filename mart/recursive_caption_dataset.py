@@ -136,11 +136,11 @@ class RecursiveCaptionDataset(data.Dataset):
         # determine metadata file
         tmp_path = "ponnet"
         if mode == "train":  # 1333 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_train.json"
+            data_path = self.annotations_dir / tmp_path / "captioning_train.json"
         elif mode == "val":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_valid.json"
+            data_path = self.annotations_dir / tmp_path / "captioning_val.json"
         elif mode == "test":  # 457 videos
-            data_path = self.annotations_dir / tmp_path / "_captioning_test.json"
+            data_path = self.annotations_dir / tmp_path / "captioning_test.json"
             mode = "val"
             self.mode = "val"
         else:
@@ -189,7 +189,7 @@ class RecursiveCaptionDataset(data.Dataset):
         items, meta = self.convert_example_to_features(self.data[index])
         return items, meta
 
-    def _load_bila_images(self, raw_name: str, num_images=5):
+    def _load_bila_images(self, raw_name: str, num_images=3):
         """
         画像を読み込んでくる
         Args:
@@ -201,8 +201,8 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         # 動画に関する特徴量を取得
         #
-        file_n = os.path.join(".", "ponnet_data", "frames_pkl", "_"  + raw_name)
-        future_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl")
+        file_n = os.path.join(".", "ponnet_data", "res_frames", "_"  + raw_name)
+        future_feat_n = os.path.join(".", "ponnet_data", "center_future_frames")
         image_feats = []
         for idx in range(num_images):
             file_name = os.path.join(file_n, "frame_" + str(idx) + ".pkl")
@@ -212,12 +212,15 @@ class RecursiveCaptionDataset(data.Dataset):
             image_feats.append(feat)
             # print([len(v) for v in image_feats])
         # print(image_feats[-1].shape)
-        image_feats.append(image_feats[-1])
+        # image_feats.append(image_feats[-1])
         image_feats = np.array(image_feats)
-        file_name_future = os.path.join(future_feat_n, raw_name + ".pkl")
-        with open(file_name_future, "rb") as f:
-            future_feat = pickle.load(f)
-
+        file_name_future = os.path.join(future_feat_n, raw_name + ".png")
+        # cv2.imshow("gt", cv2.imread(file_name_future))
+        # cv2.waitKey(1)
+        # with open(file_name_future, "rb") as f:
+        #     future_feat = pickle.load(f)
+        future_feat = cv2.imread(file_name_future)
+        # print(future_feat.shape)
         return image_feats, future_feat
 
 

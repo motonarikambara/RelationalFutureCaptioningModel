@@ -39,7 +39,8 @@ from nntrainer.metric import (
 from nntrainer.models import BaseModelManager
 from nntrainer.trainer_configs import BaseTrainerState
 from nntrainer.utils import TrainerPathConst
-import wandb
+import cv2
+# import wandb
 
 
 def cal_performance(pred, gold):
@@ -299,6 +300,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         self.val_steps = 0
         self.test_steps = 0
         self.beforeloss = 0.0
+        self.flag = 0
 
     def train_model(
         self, train_loader: data.DataLoader, val_loader: data.DataLoader, test_loader
@@ -310,7 +312,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        wandb.init(name="ponnet_ours", project="mart")
+        # wandb.init(name="ponnet_ours", project="mart")
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
@@ -363,6 +365,14 @@ class MartTrainer(trainer_base.BaseTrainer):
                     ]
                     input_labels_list = [e["input_labels"] for e in batched_data]
                     gt_clip = [e["gt_clip"] for e in batched_data]
+                    # print(type(gt_clip[0]))
+                    # print(gt_clip[0][0].shape)
+                    # if self.flag == 0:
+                    #     gt_img = gt_clip[0][2].to('cpu').detach().numpy().copy().astype(np.uint8)
+                    #     print(gt_img)
+                    #     print(gt_img.shape)
+                    #     cv2.imwrite("gt.png", gt_img)
+                    #     self.flag = 1
                     if self.cfg.debug:
                         cur_data = batched_data[step]
                         self.logger.info(
@@ -459,7 +469,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             self.metrics.update_meter(MMeters.TRAIN_ACC, accuracy)
             # return loss_per_word, accuracy
             batch_loss /= num_steps
-            wandb.log({"train_loss": batch_loss})
+            # wandb.log({"train_loss": batch_loss})
 
             # ---------- validation ----------
             do_val = self.check_is_val_epoch()
@@ -645,8 +655,8 @@ class MartTrainer(trainer_base.BaseTrainer):
         # ---------- validation done ----------
         batch_loss /= batch_idx
         loss_delta = self.beforeloss - batch_loss
-        wandb.log({"val_loss_diff": loss_delta})
-        wandb.log({"val_loss": batch_loss})
+        # wandb.log({"val_loss_diff": loss_delta})
+        # wandb.log({"val_loss": batch_loss})
         self.beforeloss = batch_loss
 
         # sort translation
@@ -723,7 +733,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         )
 
         # find field which determines whether this is a new best epoch
-        wandb.log({"val_BLEU4": flat_metrics["Bleu_4"], "val_METEOR": flat_metrics["METEOR"], "val_ROUGE_L": flat_metrics["ROUGE_L"], "val_CIDEr": flat_metrics["CIDEr"]})
+        # wandb.log({"val_BLEU4": flat_metrics["Bleu_4"], "val_METEOR": flat_metrics["METEOR"], "val_ROUGE_L": flat_metrics["ROUGE_L"], "val_CIDEr": flat_metrics["CIDEr"]})
         if self.cfg.val.det_best_field == "cider":
             # val_score = flat_metrics["CIDEr"]
             val_score = -1 * batch_loss
@@ -914,7 +924,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             pbar.update()
         pbar.close()
         batch_loss /= batch_idx
-        wandb.log({"test_loss": batch_loss})
+        # wandb.log({"test_loss": batch_loss})
 
         # ---------- validation done ----------
 
@@ -974,7 +984,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         self.logger.info(
             f"Done with translation, epoch {self.state.current_epoch} split {eval_mode}"
         )
-        wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
+        # wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
         self.test_metrics = TRANSLATION_METRICS_LOG
         self.higest_test = flat_metrics
         self.logger.info(

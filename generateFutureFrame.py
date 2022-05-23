@@ -5,6 +5,42 @@ import csv
 import subprocess
 from tqdm import tqdm
 import os
+import numpy as np
+from PIL import Image
+
+
+
+def crop_center(pil_img, crop_width, crop_height):
+    img_width, img_height = pil_img.size
+    return pil_img.crop(((img_width - crop_width) // 2,
+                         (img_height - crop_height) // 2 + 80,
+                         (img_width + crop_width) // 2,
+                         (img_height + crop_height) // 2 + 80))
+
+
+def cv2pil(image):
+    ''' OpenCV型 -> PIL型 '''
+    new_image = image.copy()
+    if new_image.ndim == 2:  # モノクロ
+        pass
+    elif new_image.shape[2] == 3:  # カラー
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_BGR2RGB)
+    elif new_image.shape[2] == 4:  # 透過
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_BGRA2RGBA)
+    new_image = Image.fromarray(new_image)
+    return new_image
+
+
+def pil2cv(image):
+    ''' PIL型 -> OpenCV型 '''
+    new_image = np.array(image, dtype=np.uint8)
+    if new_image.ndim == 2:  # モノクロ
+        pass
+    elif new_image.shape[2] == 3:  # カラー
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_RGB2BGR)
+    elif new_image.shape[2] == 4:  # 透過
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_RGBA2BGRA)
+    return new_image
 
 
 def save_frames(video_path: str, frame_dir: str,
@@ -34,7 +70,7 @@ def save_frames(video_path: str, frame_dir: str,
             if cap.get(cv2.CAP_PROP_POS_FRAMES) == 1:  # 0秒のフレームを保存
                 # cv2.imwrite("{}_{}.{}".format(base_path, "0", ext),
                 #             frame)
-                print("Hello World!")
+                pass
             elif idx < cap.get(cv2.CAP_PROP_FPS):
                 continue
             else:  # 1秒ずつフレームを保存
@@ -45,18 +81,22 @@ def save_frames(video_path: str, frame_dir: str,
                 if second == 5:
                     # cv2.imwrite("{}_{}.{}".format(base_path, filled_second, ext),
                     #             frame)
+                    # 切り抜き
+                    frame = cv2.resize(frame, dsize=(500, 500))
+                    frame = cv2pil(frame)
+                    frame = crop_center(frame, 224, 224)
+                    frame = pil2cv(frame)
                     cv2.imwrite(os.path.join(base_path, "{}.{}".format(file_name, ext)), frame)
                 idx = 0
         else:
             break
 
 if __name__ == "__main__":
-    frame_dir = "./ponnet_data/future_frames/"
+    frame_dir = "./ponnet_data/center_future_frames/"
     clip_file = "./ponnet_data/1000samples.csv"
 
     with open(clip_file, 'r') as f:
         reader = csv.reader(f, delimiter=",")
-        header = next(reader)
         # reader = csv.reader(f)
         i = 0
         for row in tqdm(reader):

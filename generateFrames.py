@@ -45,7 +45,6 @@ if __name__ == "__main__":
 
     with open(clip_file, 'r') as f:
         reader = csv.reader(f, delimiter=",")
-        header = next(reader)
         # reader = csv.reader(f)
         i = 0
         for row in tqdm(reader):

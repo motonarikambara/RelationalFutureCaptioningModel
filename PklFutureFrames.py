@@ -10,18 +10,19 @@ import torch.nn.functional as F
 import torchvision.models as models
 import pickle
 from torch import nn
+from PIL import Image
 
 
 class SubLayerT(nn.Module):
     def __init__(self):
         super(SubLayerT, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
+        # self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
         self.resnet = models.resnet50(pretrained=True)
-        self.fc1 = nn.Linear(512, 768)
+        # self.fc1 = nn.Linear(512, 768)
 
     def forward(self, x):
-        x = self.conv1(x)
+        # x = self.conv1(x)
         x = self.resnet.conv1(x)
         x = self.resnet.bn1(x)
         x = self.resnet.relu(x)
@@ -34,6 +35,40 @@ class SubLayerT(nn.Module):
         # x = torch.reshape(x,(-1, 1, 768))
 
         return x
+
+
+def crop_center(pil_img, crop_width, crop_height):
+    img_width, img_height = pil_img.size
+    return pil_img.crop(((img_width - crop_width) // 2,
+                         (img_height - crop_height) // 2 + 80,
+                         (img_width + crop_width) // 2,
+                         (img_height + crop_height) // 2 + 80))
+
+
+def cv2pil(image):
+    ''' OpenCV型 -> PIL型 '''
+    new_image = image.copy()
+    if new_image.ndim == 2:  # モノクロ
+        pass
+    elif new_image.shape[2] == 3:  # カラー
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_BGR2RGB)
+    elif new_image.shape[2] == 4:  # 透過
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_BGRA2RGBA)
+    new_image = Image.fromarray(new_image)
+    return new_image
+
+
+def pil2cv(image):
+    ''' PIL型 -> OpenCV型 '''
+    new_image = np.array(image, dtype=np.uint8)
+    if new_image.ndim == 2:  # モノクロ
+        pass
+    elif new_image.shape[2] == 3:  # カラー
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_RGB2BGR)
+    elif new_image.shape[2] == 4:  # 透過
+        new_image = cv2.cvtColor(new_image, cv2.COLOR_RGBA2BGRA)
+    return new_image
+
 
 
 def save_frames(video_path: str, frame_dir: str,
@@ -70,8 +105,13 @@ def save_frames(video_path: str, frame_dir: str,
                 # cv2.imwrite("{}_{}.{}".format(base_path, second, ext),
                 #             frame)
                 if second == 5:
+                    # 切り抜き
+                    frame = cv2.resize(frame, dsize=(500, 500))
+                    frame = cv2pil(frame)
+                    frame = crop_center(frame, 224, 224)
+                    frame = pil2cv(frame)
                     frame = torch.from_numpy(frame.astype(np.float32)).clone()
-                    frame = torch.reshape(frame, (1, 3, 720, 1280))
+                    frame = torch.reshape(frame, (1, 3, 224, 224))
                     frame = net(frame)
                     frame = frame.to('cpu').detach().numpy().copy()
                     with open(join(base_path, "{}.{}".format(file_name, ext)), "wb") as f:
@@ -82,12 +122,11 @@ def save_frames(video_path: str, frame_dir: str,
 
 
 if __name__ == "__main__":
-    frame_dir = "./ponnet_data/future_frames_pkl/"
+    frame_dir = "./ponnet_data/center_future_frames_pkl/"
     clip_file = "./ponnet_data/1000samples.csv"
 
     with open(clip_file, 'r') as f:
         reader = csv.reader(f, delimiter=",")
-        header = next(reader)
         # reader = csv.reader(f)
         i = 0
         for row in tqdm(reader):
