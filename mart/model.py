@@ -752,7 +752,7 @@ class CLIPloss(nn.Module):
 
     def forward(self, rec, gt):
         gt = torch.flatten(gt, 1)
-        # print("gt", gt.shape)
+        # print("rec", rec.shape)
         # gt = self.w(gt)
         i_e = self.norm_i(rec)
         t_e = self.norm_t(gt)
@@ -964,7 +964,7 @@ class RecursiveTransformer(nn.Module):
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
 
             # caption_loss += 0.9 * snt_loss
-            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + 100 * cont_loss + action_loss
+            caption_loss += 0.9 * snt_loss + 10 * fut_loss + 100 * cont_loss + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
