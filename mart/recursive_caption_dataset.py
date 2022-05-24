@@ -18,6 +18,7 @@ from torch.utils.data.dataloader import default_collate
 from tqdm import tqdm
 import sys
 from torch import nn
+import cv2
 
 from mart.configs_mart import MartConfig, MartPathConst
 from nntrainer.typext import ConstantHolder
@@ -219,19 +220,15 @@ class RecursiveCaptionDataset(data.Dataset):
         """
         # 動画に関する特徴量を取得
         feat_file = raw_name + ".pkl"
+        all_feat_file = raw_name + ".png"
         file_n = os.path.join(".", "ponnet_data", "res_frames_pkl", feat_file)
-        all_feat_n = os.path.join(".", "ponnet_data", "center_future_frames_pkl", feat_file)
-        all_feat_n = os.path.join(".", "ponnet_data", "res_frames_pkl", feat_file)
+        all_feat_n = os.path.join(".", "ponnet_data", "64_center_future_frames", all_feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
-        with open(all_feat_n, "rb") as f:
-            all_emb_feat = pickle.load(f)
-        # f = open('embfeat.txt', 'a')
-        # f.write(str(emb_feat))
-        # f.close()
-        # f = open('allembfeat.txt', 'a')
-        # f.write(str(all_emb_feat))
-        # f.close()
+        # with open(all_feat_n, "rb") as f:
+        #     all_emb_feat = pickle.load(f)
+
+        all_emb_feat = cv2.imread(all_feat_n)
 
         # file_n = os.path.join(".", "ponnet_data", "frames_pkl", "_"  + raw_name)
         # future_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl")

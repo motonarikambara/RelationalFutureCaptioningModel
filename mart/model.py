@@ -885,12 +885,12 @@ class CLIPloss(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.w = nn.Linear(25 * 768, 128 * 128 * 3)
+        self.w = nn.Linear(25 * 768, 64 * 64 * 3)
         self.t = torch.randn(1, requires_grad=True).cuda()
         self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
-        self.norm_i = nn.LayerNorm(128 * 128 * 3)
-        self.norm_t = nn.LayerNorm(128 * 128 * 3)
+        self.norm_i = nn.LayerNorm(64 * 64 * 3)
+        self.norm_t = nn.LayerNorm(64 * 64 * 3)
 
     def forward(self, clip, text):
         text = torch.flatten(text, 1)
@@ -938,8 +938,8 @@ class RecursiveTransformer(nn.Module):
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
-        self.size_adjust = nn.Linear(128 * 128 * 3, 384)
-        self.upsampling = nn.Linear(384, 128 * 128 * 3)
+        self.size_adjust = nn.Linear(64 * 64 * 3, 384)
+        self.upsampling = nn.Linear(384, 64 * 64 * 3)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
@@ -955,6 +955,7 @@ class RecursiveTransformer(nn.Module):
             nn.Dropout(0.2),
         )
         self.future_loss = nn.MSELoss()
+        # self.future_loss = nn.L1Loss()
         self.apply(self.init_bert_weights)
         self.cliploss = CLIPloss()
 
@@ -1108,17 +1109,20 @@ class RecursiveTransformer(nn.Module):
 
             # cont_loss += self.cliploss(future_rec[idx], future_gt[idx])
             # print("enc", encoded_outputs_list[idx][0].shape)
+
             # cont_loss += self.cliploss(future_rec[idx], encoded_outputs_list[idx][0])
             if gt_clip is not None:
-                fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
+                # print("rec", future_rec[idx].shape)
+                # print("gt", future_gt[idx].shape)
+                fut_loss = self.future_loss(future_rec[idx], future_gt[idx].reshape(-1, 12288))
                 for i in range(future_rec[idx].size()[0]):
                     # print("rec", future_rec[idx][i].shape)
                     # print("gt", future_gt[idx][i].shape)
 
                     tmp_img = future_rec[idx][i]
                     gt_img = future_gt[idx][i]
-                    tmp_img = future_rec[idx][i].reshape(128, 128, 3)
-                    gt_img = future_gt[idx][i].reshape(128, 128, 3)
+                    tmp_img = future_rec[idx][i].reshape(64, 64, 3)
+                    gt_img = future_gt[idx][i].reshape(64, 64, 3)
                     tmp_img = tmp_img.to('cpu').detach().numpy().copy().astype(np.uint8)
                     gt_img = gt_img.to('cpu').detach().numpy().copy().astype(np.uint8)
                     # print("tmp", tmp_img.shape)
@@ -1129,6 +1133,7 @@ class RecursiveTransformer(nn.Module):
                 self.idx = 0
 
             # caption_loss += 0.9 * snt_loss
+            caption_loss += fut_loss
             caption_loss += 0.9 * snt_loss + 10 * fut_loss + 100 * cont_loss + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size

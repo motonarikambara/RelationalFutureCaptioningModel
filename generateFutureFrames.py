@@ -4,38 +4,10 @@ from os.path import splitext, dirname, basename, join
 import csv
 import subprocess
 from tqdm import tqdm
-import torch
+import os
 import numpy as np
-import torch.nn.functional as F
-import torchvision.models as models
-import pickle
-from torch import nn
 from PIL import Image
 
-
-class SubLayerT(nn.Module):
-    def __init__(self):
-        super(SubLayerT, self).__init__()
-
-        # self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
-        self.resnet = models.resnet50(pretrained=True)
-        # self.fc1 = nn.Linear(512, 768)
-
-    def forward(self, x):
-        # x = self.conv1(x)
-        x = self.resnet.conv1(x)
-        x = self.resnet.bn1(x)
-        x = self.resnet.relu(x)
-        x = self.resnet.maxpool(x)
-        x = self.resnet.layer1(x)
-        # print(x.shape)
-        # x = self.resnet.layer2(x) # (b, 512, 23, 40)
-        x = F.adaptive_avg_pool2d(x, (6, 8)) # (b, 256, 64, 3)
-        x = torch.reshape(x,(-1, 64 * 64 * 3))
-        # x = self.fc1(x)
-        # x = torch.reshape(x,(-1, 1, 768))
-
-        return x
 
 
 def crop_center(pil_img, crop_width, crop_height):
@@ -71,10 +43,8 @@ def pil2cv(image):
     return new_image
 
 
-
 def save_frames(video_path: str, frame_dir: str,
-                name="frame", ext="pkl", file_name="tmp"):
-    net = SubLayerT()
+                name="frame", ext="png", file_name="tmp"):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return
@@ -83,7 +53,13 @@ def save_frames(video_path: str, frame_dir: str,
     #     frame_dir = dirname(frame_dir)
     # frame_dir_ = join(frame_dir, v_name)
 
-    # makedirs(frame_dir_, exist_ok=True)
+
+    v_name = splitext(basename(video_path))[0]
+    # if frame_dir[-1:] == "\\" or frame_dir[-1:] == "/":
+    #     frame_dir = dirname(frame_dir)
+
+    # makedirs(frame_dir, exist_ok=True)
+    # base_path = join(frame_dir, name)
     base_path = frame_dir
 
     idx = 0
@@ -94,44 +70,34 @@ def save_frames(video_path: str, frame_dir: str,
             if cap.get(cv2.CAP_PROP_POS_FRAMES) == 1:  # 0秒のフレームを保存
                 # cv2.imwrite("{}_{}.{}".format(base_path, "0", ext),
                 #             frame)
-                # with open("{}_{}.{}".format(base_path, '0', ext), "wb") as f:
-                #     pickle.dump(frame, f)
                 pass
             elif idx < cap.get(cv2.CAP_PROP_FPS):
                 continue
             else:  # 1秒ずつフレームを保存
                 second = int(cap.get(cv2.CAP_PROP_POS_FRAMES)/idx)
+                # filled_second = str(second)
                 if second > 1:
                     break
-                # cv2.imwrite("{}_{}.{}".format(base_path, second, ext),
-                #             frame)
-                # 切り抜き
-                frame = cv2.resize(frame, dsize=(500, 500))
-                frame = cv2pil(frame)
-                frame = crop_center(frame, 224, 224)
-                frame = pil2cv(frame)
-                frame = cv2.resize(frame, dsize=(64, 64))
-
-                frame = torch.from_numpy(frame.astype(np.float32)).clone()
-                frame = torch.reshape(frame, (1, 3, 64, 64))
-                frame = net(frame)
-                # frame = frame.reshape((64, 64, 3))
-                frame = frame.to('cpu').detach().numpy().copy()
-                # cv2.imwrite("./gt.png", frame)
-                with open(join(base_path, "{}.{}".format(file_name, ext)), "wb") as f:
-                    pickle.dump(frame, f)
+                if second == 1:
+                    # cv2.imwrite("{}_{}.{}".format(base_path, filled_second, ext),
+                    #             frame)
+                    # 切り抜き
+                    frame = cv2.resize(frame, dsize=(500, 500))
+                    frame = cv2pil(frame)
+                    frame = crop_center(frame, 224, 224)
+                    frame = pil2cv(frame)
+                    frame = cv2.resize(frame, dsize=(64, 64))
+                    cv2.imwrite(os.path.join(base_path, "{}.{}".format(file_name, ext)), frame)
                 idx = 0
         else:
             break
 
-
 if __name__ == "__main__":
-    frame_dir = "./ponnet_data/res_frames_pkl/"
+    frame_dir = "./ponnet_data/64_center_future_frames/"
     clip_file = "./ponnet_data/1000samples.csv"
 
     with open(clip_file, 'r') as f:
         reader = csv.reader(f, delimiter=",")
-        # header = next(reader)
         # reader = csv.reader(f)
         i = 0
         for row in tqdm(reader):
