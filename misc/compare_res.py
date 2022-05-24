@@ -21,7 +21,7 @@ def compare_res(res_path, out_path):
         res = json.load(f)
     res = res["results"]
     comp = []
-    header = ["timestamp", "gen_sent", "gt_sent"]
+    header = ["gen_sent", "gt_sent"]
     comp.append(header)
 
     for vid in res:

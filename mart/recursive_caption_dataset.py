@@ -221,16 +221,17 @@ class RecursiveCaptionDataset(data.Dataset):
         feat_file = raw_name + ".pkl"
         file_n = os.path.join(".", "ponnet_data", "res_frames_pkl", feat_file)
         all_feat_n = os.path.join(".", "ponnet_data", "center_future_frames_pkl", feat_file)
+        all_feat_n = os.path.join(".", "ponnet_data", "res_frames_pkl", feat_file)
         with open(file_n, "rb") as f:
             emb_feat = pickle.load(f)
         with open(all_feat_n, "rb") as f:
             all_emb_feat = pickle.load(f)
-        f = open('embfeat.txt', 'a')
-        f.write(str(emb_feat))
-        f.close()
-        f = open('allembfeat.txt', 'a')
-        f.write(str(all_emb_feat))
-        f.close()
+        # f = open('embfeat.txt', 'a')
+        # f.write(str(emb_feat))
+        # f.close()
+        # f = open('allembfeat.txt', 'a')
+        # f.write(str(all_emb_feat))
+        # f.close()
 
         # file_n = os.path.join(".", "ponnet_data", "frames_pkl", "_"  + raw_name)
         # future_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl")

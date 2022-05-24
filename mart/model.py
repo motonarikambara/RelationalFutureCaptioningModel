@@ -18,10 +18,13 @@ from mart.masked_transformer import MTransformer
 from mart.loss_caption import LabelSmoothingLoss
 from nntrainer.utils_torch import count_parameters
 
+import cv2
+import os
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-ACTION_WEIGHT = {7: 636, 9: 133}
+ACTION_WEIGHT = {111: 131, 94: 628}
 
 # # default infinity (cfg.inf = 0), works with fp32. this can lead to NaN values in some circumstances
 INF = float("inf")
@@ -493,9 +496,12 @@ class TrmEncLayer(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.attention = RelationalSelfAttention(cfg)
+        # self.attention = RelationalSelfAttention(cfg)
         # self.attention = Attention(cfg)
+        self.attention = MultiHeadRSA(cfg)
         self.output = TrmFeedForward(cfg)
+
+        # self.LayerNorm = nn.LayerNorm(cfg.hidden_size, eps=cfg.layer_norm_eps)
 
     def forward(self, x):
         """
@@ -505,6 +511,7 @@ class TrmEncLayer(nn.Module):
         """
         tmp_x = x.clone()
         target = x[:, 1, :].clone()
+        # target = self.LayerNorm(target)
         target = self.attention(target, tmp_x)
         x[:, 1, :] = target.clone()
         # x = self.attention(x)
@@ -609,6 +616,110 @@ class EmbeddingsWithVideo(nn.Module):
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings  # (N, L, D)
+
+
+
+class MultiHeadRSA(nn.Module):
+    def __init__(self, cfg, m=3):
+        super().__init__()
+        self.cfg = cfg
+        self.m = m
+        self.hidden_size = 384
+        self.head = 12
+        tmp_size = self.hidden_size // self.head
+        self.query_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.key_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.value_layer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.p = torch.randn((self.head, m, tmp_size), requires_grad=True).cuda()
+        self.h =\
+            torch.randn((self.head, m * tmp_size, m), requires_grad=True).cuda()
+        self.g = torch.randn((self.head, m, tmp_size), requires_grad=True).cuda()
+        self.one = torch.ones((m, 1)).cuda()
+        # self.ffn = FeedforwardNeuralNetModel(self.hidden_size, self.hidden_size * 2, self.hidden_size)
+        # self.ln = nn.LayerNorm(self.hidden_size)
+
+    def forward(self, target, cont):
+        if self.hidden_size % self.head == 0:
+            query = self.query_layer(target).reshape(-1, self.hidden_size, 1)
+            key = self.key_layer(cont)
+            value = self.value_layer(cont)
+
+            tmp_size = self.hidden_size // self.head
+            query = query.reshape((-1, 1, self.head, tmp_size)).permute(0, 2, 1, 3)
+            key = key.reshape((-1, self.m, self.head, tmp_size)).permute(0, 2, 1, 3)
+            value = value.reshape((-1, self.m, self.head, tmp_size)).permute(0, 2, 1, 3)
+
+            # basic kernel
+            kernel_v = torch.matmul(self.p, query.permute(0, 1, 3, 2)).reshape(-1, self.head, 1, self.m)
+
+            # relational kernel
+            q = torch.matmul(self.one, query)
+            # q = F.softmax(q)
+            x_q = torch.mul(q, key)
+            x_q = x_q.reshape((-1, self.head, 1, self.m * tmp_size))
+            kernel_r = torch.matmul(x_q, self.h).reshape(-1, self.head, 1, self.m)
+            kernel = kernel_v + kernel_r
+
+            # basic context
+            # basic_cont = context.clone()
+
+            # relational context
+            xg = value.clone()
+            xg = torch.transpose(xg, 2, 3)
+            _xg = torch.matmul(xg, self.g)
+            x_nr = torch.matmul(value, _xg)
+            context = x_nr + value
+
+            output = torch.matmul(kernel, context).reshape(-1, self.hidden_size)
+            # output = F.softmax(output)
+            # output = self.ln(output)
+            # output = self.ffn(output)
+            return output
+        else:
+            print("hidden_size/head was wrong", file=sys.stderr)
+            sys.exit(1)
+
+
+class FeedforwardNeuralNetModel(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(FeedforwardNeuralNetModel, self).__init__()
+        # Linear function 1: 784 --> 100
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        # Non-linearity 1
+        self.relu1 = nn.ReLU()
+
+        # Linear function 2: 100 --> 100
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        # Non-linearity 2
+        self.relu2 = nn.ReLU()
+
+        # Linear function 3: 100 --> 100
+        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
+        # Non-linearity 3
+        self.relu3 = nn.ReLU()
+
+        # Linear function 4 (readout): 100 --> 10
+        self.fc4 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        # Linear function 1
+        out = self.fc1(x)
+        # Non-linearity 1
+        out = self.relu1(out)
+
+        # Linear function 2
+        out = self.fc2(out)
+        # Non-linearity 2
+        out = self.relu2(out)
+
+        # Linear function 2
+        out = self.fc3(out)
+        # Non-linearity 2
+        out = self.relu3(out)
+
+        # Linear function 4 (readout)
+        out = self.fc4(out)
+        return out
 
 
 class PredictionHeadTransform(nn.Module):
@@ -736,6 +847,37 @@ class TimeSeriesMoudule(nn.Module):
         return ts_feats, tmp_feats
 
 
+# class CLIPloss(nn.Module):
+#     """
+#     CLIPで用いられているloss
+#     https://cdn.openai.com/papers/Learning_Transferable_Visual_Models_From_Natural_Language_Supervision.pdf
+#     """
+#     def __init__(self):
+#         super().__init__()
+#         # self.w = nn.Linear(512, 384)
+#         self.t = torch.randn(1, requires_grad=True).cuda()
+#         self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
+#         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
+#         self.norm_i = nn.LayerNorm(512)
+#         self.norm_t = nn.LayerNorm(512)
+
+#     def forward(self, rec, gt):
+#         gt = torch.flatten(gt, 1)
+#         # print("rec", rec.shape)
+#         # gt = self.w(gt)
+#         i_e = self.norm_i(rec)
+#         t_e = self.norm_t(gt)
+#         logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
+#         # print(logits)
+#         # sys.exit()
+#         n = i_e.shape[0]
+#         labels = torch.arange(n, device=torch.device("cuda"))
+#         loss_i = self.i_loss(logits, labels)
+#         loss_t = self.t_loss(logits, labels)
+#         cliploss = (loss_i + loss_t) / 2
+#         return cliploss
+
+
 class CLIPloss(nn.Module):
     """
     CLIPで用いられているloss
@@ -743,19 +885,20 @@ class CLIPloss(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        # self.w = nn.Linear(512, 384)
+        self.w = nn.Linear(25 * 768, 512)
         self.t = torch.randn(1, requires_grad=True).cuda()
         self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
         self.norm_i = nn.LayerNorm(512)
         self.norm_t = nn.LayerNorm(512)
 
-    def forward(self, rec, gt):
-        gt = torch.flatten(gt, 1)
-        # print("rec", rec.shape)
-        # gt = self.w(gt)
-        i_e = self.norm_i(rec)
-        t_e = self.norm_t(gt)
+    def forward(self, clip, text):
+        text = torch.flatten(text, 1)
+        # print("clip", clip.shape)
+        # print("text", text.shape)
+        text = self.w(text)
+        i_e = self.norm_i(clip)
+        t_e = self.norm_t(text)
         logits = torch.matmul(i_e, torch.t(t_e)) * torch.exp(self.t)
         # print(logits)
         # sys.exit()
@@ -772,7 +915,7 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
-        self.cfg.vocab_size = 252
+        self.cfg.vocab_size = 130
         self.z_f = torch.randn(1, requires_grad=True).cuda()
         self.z_p = torch.randn(1, requires_grad=True).cuda()
         self.embeddings = EmbeddingsWithVideo(cfg, add_postion_embeddings=True)
@@ -814,6 +957,8 @@ class RecursiveTransformer(nn.Module):
         self.future_loss = nn.MSELoss()
         self.apply(self.init_bert_weights)
         self.cliploss = CLIPloss()
+
+        self.idx = 0
 
     def init_bert_weights(self, module):
         """
@@ -919,6 +1064,7 @@ class RecursiveTransformer(nn.Module):
                 )
                 future_gt.append(gt_clip[idx])
                 future_rec.append(pred_future)
+                # print(type(encoded_layer_outputs[0]))
                 encoded_outputs_list.append(encoded_layer_outputs)
                 prediction_scores_list.append(prediction_scores)
                 action_score.append(prediction_scores[:, 3, :])
@@ -959,12 +1105,30 @@ class RecursiveTransformer(nn.Module):
             #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i-1].view(-1))
             # for i in range(0, len(tmp_pred_score_list) - 1):
             #     cont_loss += self.contloss_func(tmp_pred_score_list[i].view(-1, self.cfg.vocab_size), tmp_idx_list[i+1].view(-1))
-            cont_loss += self.cliploss(future_rec[idx], future_gt[idx])
+
+            # cont_loss += self.cliploss(future_rec[idx], future_gt[idx])
+            # print("enc", encoded_outputs_list[idx][0].shape)
+            cont_loss += self.cliploss(future_rec[idx], encoded_outputs_list[idx][0])
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
+                # for i in range(future_rec[idx].size()[0]):
+                #     print("rec", future_rec[idx][i].shape)
+                #     print("gt", future_gt[idx][i].shape)
+
+                #     tmp_img = future_rec[idx][i]
+                #     gt_img = future_gt[idx][i]
+                #     # tmp_img = future_rec[idx][i].reshape(224, 224, 3)
+                #     # gt_img = future_gt[idx][i].reshape(224, 224, 3)
+                #     tmp_img = tmp_img.to('cpu').detach().numpy().copy().astype(np.uint8)
+                #     gt_img = gt_img.to('cpu').detach().numpy().copy().astype(np.uint8)
+                #     # print("tmp", tmp_img.shape)
+                #     # print(gt_img.shape)
+                #     cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "pred.png"), tmp_img)
+                #     cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "gt.png"), gt_img)
+                #     self.idx += 1
 
             # caption_loss += 0.9 * snt_loss
-            caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + 100 * cont_loss + action_loss
+            caption_loss += 0.9 * snt_loss + 10 * fut_loss + 100 * cont_loss + action_loss
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
