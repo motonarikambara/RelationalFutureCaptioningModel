@@ -1076,17 +1076,17 @@ class RecursiveTransformer(nn.Module):
                     # print("gt", future_gt[idx][i].shape)
                     fut_loss = self.future_loss(future_rec[idx][i], future_gt[idx][i])
 
-                    # tmp_img = future_rec[idx][i]
-                    # gt_img = future_gt[idx][i]
-                    # # tmp_img = future_rec[idx][i].reshape(224, 224, 3)
-                    # # gt_img = future_gt[idx][i].reshape(224, 224, 3)
-                    # tmp_img = tmp_img.to('cpu').detach().numpy().copy().astype(np.uint8)
-                    # gt_img = gt_img.to('cpu').detach().numpy().copy().astype(np.uint8)
-                    # # print("tmp", tmp_img.shape)
-                    # # print(gt_img.shape)
-                    # cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "pred.png"), tmp_img)
-                    # cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "gt.png"), gt_img)
-                    # self.idx += 1
+                    tmp_img = future_rec[idx][i]
+                    gt_img = future_gt[idx][i]
+                    # tmp_img = future_rec[idx][i].reshape(224, 224, 3)
+                    # gt_img = future_gt[idx][i].reshape(224, 224, 3)
+                    tmp_img = tmp_img.to('cpu').detach().numpy().copy().astype(np.uint8)
+                    gt_img = gt_img.to('cpu').detach().numpy().copy().astype(np.uint8)
+                    # print("tmp", tmp_img.shape)
+                    # print(gt_img.shape)
+                    cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "pred.png"), tmp_img)
+                    cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "gt.png"), gt_img)
+                    self.idx += 1
                 # print(future_gt[idx].shape)
                 cont_loss += self.cliploss(future_rec[idx].reshape(-1, 512), future_gt[idx].reshape(-1, 512))
             self.idx = 0

@@ -30,6 +30,8 @@
 *.pt
 *-ubyte
 *.png
+*.txt
+fiveTime.sh
 
 # pycharm
 .idea/
