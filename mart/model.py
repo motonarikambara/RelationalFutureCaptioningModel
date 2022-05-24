@@ -885,12 +885,12 @@ class CLIPloss(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.w = nn.Linear(25 * 768, 512)
+        self.w = nn.Linear(25 * 768, 128 * 128 * 3)
         self.t = torch.randn(1, requires_grad=True).cuda()
         self.i_loss = nn.CrossEntropyLoss(ignore_index=0)
         self.t_loss = nn.CrossEntropyLoss(ignore_index=1)
-        self.norm_i = nn.LayerNorm(512)
-        self.norm_t = nn.LayerNorm(512)
+        self.norm_i = nn.LayerNorm(128 * 128 * 3)
+        self.norm_t = nn.LayerNorm(128 * 128 * 3)
 
     def forward(self, clip, text):
         text = torch.flatten(text, 1)
@@ -938,8 +938,8 @@ class RecursiveTransformer(nn.Module):
         self.actionloss_func = nn.CrossEntropyLoss()
         # clipの特徴量の次元
         input_size = 384
-        self.size_adjust = nn.Linear(512, 384)
-        self.upsampling = nn.Linear(384, 512)
+        self.size_adjust = nn.Linear(128 * 128 * 3, 384)
+        self.upsampling = nn.Linear(384, 128 * 128 * 3)
         self.pred_f = nn.Sequential(
             nn.Linear(input_size, input_size * 2),
             nn.ReLU(),
@@ -1108,24 +1108,25 @@ class RecursiveTransformer(nn.Module):
 
             # cont_loss += self.cliploss(future_rec[idx], future_gt[idx])
             # print("enc", encoded_outputs_list[idx][0].shape)
-            cont_loss += self.cliploss(future_rec[idx], encoded_outputs_list[idx][0])
+            # cont_loss += self.cliploss(future_rec[idx], encoded_outputs_list[idx][0])
             if gt_clip is not None:
                 fut_loss = self.future_loss(future_rec[idx], future_gt[idx])
-                # for i in range(future_rec[idx].size()[0]):
-                #     print("rec", future_rec[idx][i].shape)
-                #     print("gt", future_gt[idx][i].shape)
+                for i in range(future_rec[idx].size()[0]):
+                    # print("rec", future_rec[idx][i].shape)
+                    # print("gt", future_gt[idx][i].shape)
 
-                #     tmp_img = future_rec[idx][i]
-                #     gt_img = future_gt[idx][i]
-                #     # tmp_img = future_rec[idx][i].reshape(224, 224, 3)
-                #     # gt_img = future_gt[idx][i].reshape(224, 224, 3)
-                #     tmp_img = tmp_img.to('cpu').detach().numpy().copy().astype(np.uint8)
-                #     gt_img = gt_img.to('cpu').detach().numpy().copy().astype(np.uint8)
-                #     # print("tmp", tmp_img.shape)
-                #     # print(gt_img.shape)
-                #     cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "pred.png"), tmp_img)
-                #     cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "gt.png"), gt_img)
-                #     self.idx += 1
+                    tmp_img = future_rec[idx][i]
+                    gt_img = future_gt[idx][i]
+                    tmp_img = future_rec[idx][i].reshape(128, 128, 3)
+                    gt_img = future_gt[idx][i].reshape(128, 128, 3)
+                    tmp_img = tmp_img.to('cpu').detach().numpy().copy().astype(np.uint8)
+                    gt_img = gt_img.to('cpu').detach().numpy().copy().astype(np.uint8)
+                    # print("tmp", tmp_img.shape)
+                    # print(gt_img.shape)
+                    cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "pred.png"), tmp_img)
+                    cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "gt.png"), gt_img)
+                    self.idx += 1
+                self.idx = 0
 
             # caption_loss += 0.9 * snt_loss
             caption_loss += 0.9 * snt_loss + 10 * fut_loss + 100 * cont_loss + action_loss

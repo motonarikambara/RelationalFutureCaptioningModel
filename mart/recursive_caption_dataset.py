@@ -358,6 +358,9 @@ class RecursiveCaptionDataset(data.Dataset):
         # only clip (1, 384)
         valid_l = 0
         feat = np.zeros((max_v_l, self.coot_dim_clip))
+        # print('coot_dim', self.coot_dim_clip)
+        # print('clip_feat', clip_feat.shape)
+        # print('feat', feat.shape)
         feat[valid_l] = clip_feat
         valid_l += 1
         return feat, valid_l

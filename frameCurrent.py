@@ -19,7 +19,7 @@ class SubLayerT(nn.Module):
 
         # self.conv1 = nn.Conv2d(3, 3, 4, stride=4) # (180, 320)
         self.resnet = models.resnet50(pretrained=True)
-        self.fc1 = nn.Linear(512, 768)
+        # self.fc1 = nn.Linear(512, 768)
 
     def forward(self, x):
         # x = self.conv1(x)
@@ -28,9 +28,10 @@ class SubLayerT(nn.Module):
         x = self.resnet.relu(x)
         x = self.resnet.maxpool(x)
         x = self.resnet.layer1(x)
+        # print(x.shape)
         # x = self.resnet.layer2(x) # (b, 512, 23, 40)
-        x = F.adaptive_avg_pool2d(x, (1, 2)) # (b, 512, 1, 1)
-        x = torch.reshape(x,(-1, 512))
+        x = F.adaptive_avg_pool2d(x, (64, 3)) # (b, 256, 64, 3)
+        x = torch.reshape(x,(-1, 128 * 128 * 3))
         # x = self.fc1(x)
         # x = torch.reshape(x,(-1, 1, 768))
 
@@ -109,9 +110,10 @@ def save_frames(video_path: str, frame_dir: str,
                 frame = cv2pil(frame)
                 frame = crop_center(frame, 224, 224)
                 frame = pil2cv(frame)
+                frame = cv2.resize(frame, dsize=(128, 128))
 
                 frame = torch.from_numpy(frame.astype(np.float32)).clone()
-                frame = torch.reshape(frame, (1, 3, 224, 224))
+                frame = torch.reshape(frame, (1, 3, 128, 128))
                 frame = net(frame)
                 frame = frame.to('cpu').detach().numpy().copy()
                 with open(join(base_path, "{}.{}".format(file_name, ext)), "wb") as f:
