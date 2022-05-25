@@ -86,14 +86,14 @@ def save_frames(video_path: str, frame_dir: str,
                     frame = cv2pil(frame)
                     frame = crop_center(frame, 224, 224)
                     frame = pil2cv(frame)
-                    frame = cv2.resize(frame, dsize=(64, 64))
+                    frame = cv2.resize(frame, dsize=(16, 16))
                     cv2.imwrite(os.path.join(base_path, "{}.{}".format(file_name, ext)), frame)
                 idx = 0
         else:
             break
 
 if __name__ == "__main__":
-    frame_dir = "./ponnet_data/64_center_future_frames/"
+    frame_dir = "./ponnet_data/16_center_future_frames/"
     clip_file = "./ponnet_data/1000samples.csv"
 
     with open(clip_file, 'r') as f:

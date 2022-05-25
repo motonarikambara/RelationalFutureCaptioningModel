@@ -398,7 +398,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                         input_masks_list,
                         token_type_ids_list,
                         input_labels_list,
-                        gt_clip
+                        gt_clip,
+                        train = True
                     )
                     self.train_steps += 1
                     num_steps += 1

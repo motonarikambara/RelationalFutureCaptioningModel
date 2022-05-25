@@ -30,8 +30,8 @@ class SubLayerT(nn.Module):
         x = self.resnet.layer1(x)
         # print(x.shape)
         # x = self.resnet.layer2(x) # (b, 512, 23, 40)
-        x = F.adaptive_avg_pool2d(x, (6, 8)) # (b, 256, 64, 3)
-        x = torch.reshape(x,(-1, 64 * 64 * 3))
+        x = F.adaptive_avg_pool2d(x, (2, 2)) # (b, 256, 2, 2)
+        x = torch.reshape(x,(-1, 1024))
         # x = self.fc1(x)
         # x = torch.reshape(x,(-1, 1, 768))
 
@@ -110,10 +110,10 @@ def save_frames(video_path: str, frame_dir: str,
                 frame = cv2pil(frame)
                 frame = crop_center(frame, 224, 224)
                 frame = pil2cv(frame)
-                frame = cv2.resize(frame, dsize=(64, 64))
+                # frame = cv2.resize(frame, dsize=(64, 64))
 
                 frame = torch.from_numpy(frame.astype(np.float32)).clone()
-                frame = torch.reshape(frame, (1, 3, 64, 64))
+                frame = torch.reshape(frame, (1, 3, 224, 224))
                 frame = net(frame)
                 # frame = frame.reshape((64, 64, 3))
                 frame = frame.to('cpu').detach().numpy().copy()
