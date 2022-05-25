@@ -989,8 +989,8 @@ class RecursiveTransformer(nn.Module):
         if gt_clip is None:
             gt_clip = video_features[:, 1:4, :].clone().cuda()
         # preprocess
-        clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
-        clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
+        # clip_feats = torch.zeros(video_features[:, 1:4, :].shape).cuda()
+        # clip_feats[:, 0:3, :] = video_features[:, 1:4, :].clone()
 
         # future_b = torch.zeros(video_features[:, 3, :].shape)
         # future_b = video_features[:, 3, :].clone()
@@ -998,11 +998,12 @@ class RecursiveTransformer(nn.Module):
         future_b = self.mlp(future_b)
 
         # future_b = self.pred_f(future_b)
-        tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
-        clip_feats[:, 2, :] = future_b
+        # tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
+        # clip_feats[:, 2, :] = future_b
 
         tmp_zeros = torch.zeros(video_features[:, 1:4, :].shape).cuda() + future_b.reshape(-1, 1, 768)
-        video_features[:, 1:4, :] = tmp_zeros
+        video_features[:, 1:4, :] = tmp_zeros.clone()
+        clip_feats = tmp_zeros.clone()
 
         # past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
         # tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
@@ -1141,14 +1142,14 @@ class RecursiveTransformer(nn.Module):
                     if train:
                         tmp_img = cv2.resize(tmp_img, dsize=(256, 256))
                         gt_img = cv2.resize(gt_img, dsize=(256, 256))
-                        cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "pred.png"), tmp_img)
-                        cv2.imwrite(os.path.join("./tmp_img", str(self.idx) + "gt.png"), gt_img)
+                        cv2.imwrite(os.path.join("./tmp_img_id56", str(self.idx) + "pred.png"), tmp_img)
+                        cv2.imwrite(os.path.join("./tmp_img_id56", str(self.idx) + "gt.png"), gt_img)
                     self.idx += 1
                 self.idx = 0
 
             # caption_loss += 0.9 * snt_loss
             # caption_loss += fut_loss
-            caption_loss += 0.9 * snt_loss + 100000 * fut_loss + 100 * cont_loss + action_loss
+            caption_loss += 0.9 * snt_loss + 5000 * fut_loss + 10 * cont_loss + action_loss / 100
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
