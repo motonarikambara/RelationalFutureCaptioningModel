@@ -231,6 +231,8 @@ class RecursiveCaptionDataset(data.Dataset):
         # emb_feat = emb_feat.to('cpu').detach().numpy().copy()
         all_emb_feat = cv2.imread(all_feat_n)
         fut_emb_feat = cv2.imread(fut_img)
+        fut_emb_feat = torch.from_numpy(fut_emb_feat.astype(np.float32)).clone()
+        fut_emb_feat = fut_emb_feat.reshape(-1, 150528)
 
         return emb_feat, all_emb_feat, fut_emb_feat
 

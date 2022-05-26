@@ -1003,6 +1003,8 @@ class RecursiveTransformer(nn.Module):
         # clip_feats[:, 2, :] = future_b
 
         tmp_zeros = torch.zeros(video_features[:, 1, :].shape).cuda() + future_b.reshape(-1, 1, 768)
+        print('tmp_zeros', tmp_zeros.shape)
+        print('video_feature', video_features[:, 1, :].shape)
         video_features[:, 1, :] = tmp_zeros.clone()
         fut_zeros = torch.zeros(video_features[:, 2:4, :].shape).cuda() + fut_emb.reshape(-1, 1, 768)
         video_features[:, 2:4, :] = fut_zeros.clone()
@@ -1152,7 +1154,7 @@ class RecursiveTransformer(nn.Module):
 
             # caption_loss += 0.9 * snt_loss
             # caption_loss += fut_loss
-            caption_loss += 0.9 * snt_loss + 4000 * fut_loss + 4 * cont_loss + action_loss / 100
+            caption_loss += 0.9 * snt_loss + 5000 * fut_loss + 5 * cont_loss + action_loss / 100
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
