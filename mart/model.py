@@ -1142,14 +1142,14 @@ class RecursiveTransformer(nn.Module):
                     if train:
                         tmp_img = cv2.resize(tmp_img, dsize=(256, 256))
                         gt_img = cv2.resize(gt_img, dsize=(256, 256))
-                        cv2.imwrite(os.path.join("./tmp_img_id56", str(self.idx) + "pred.png"), tmp_img)
-                        cv2.imwrite(os.path.join("./tmp_img_id56", str(self.idx) + "gt.png"), gt_img)
+                        cv2.imwrite(os.path.join("./tmp_img_id66", str(self.idx) + "pred.png"), tmp_img)
+                        cv2.imwrite(os.path.join("./tmp_img_id66", str(self.idx) + "gt.png"), gt_img)
                     self.idx += 1
                 self.idx = 0
 
             # caption_loss += 0.9 * snt_loss
             # caption_loss += fut_loss
-            caption_loss += 0.9 * snt_loss + 5000 * fut_loss + 10 * cont_loss + action_loss / 100
+            caption_loss += 0.9 * snt_loss + 4000 * fut_loss + 4 * cont_loss + action_loss / 100
             # caption_loss += 0.9 * snt_loss + 0.1 * fut_loss + (1 / cont_loss)
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
