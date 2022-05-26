@@ -982,7 +982,8 @@ class RecursiveTransformer(nn.Module):
         """
         single step forward in the recursive structure
         """
-        future_b = video_features[:, 3, :].clone()
+        future_b = video_features[:, 1, :].clone()
+        fut_emb = video_features[:, 3, :].clone()
         video_features = self.size_adjust(video_features)
         self.future_rec = []
         self.future_gt = []
@@ -1001,9 +1002,11 @@ class RecursiveTransformer(nn.Module):
         # tmp_feat_f = clip_feats[:, 2, :].clone().cuda()
         # clip_feats[:, 2, :] = future_b
 
-        tmp_zeros = torch.zeros(video_features[:, 1:4, :].shape).cuda() + future_b.reshape(-1, 1, 768)
-        video_features[:, 1:4, :] = tmp_zeros.clone()
-        clip_feats = tmp_zeros.clone()
+        tmp_zeros = torch.zeros(video_features[:, 1, :].shape).cuda() + future_b.reshape(-1, 1, 768)
+        video_features[:, 1, :] = tmp_zeros.clone()
+        fut_zeros = torch.zeros(video_features[:, 2:4, :].shape).cuda() + fut_emb.reshape(-1, 1, 768)
+        video_features[:, 2:4, :] = fut_zeros.clone()
+        clip_feats = video_features[:, 1:4, :].clone()
 
         # past_feats = gt_clip[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
         # tmp_feats = clip_feats[:, 0, :].reshape((-1, 1, 384)).clone().cuda()
@@ -1142,8 +1145,8 @@ class RecursiveTransformer(nn.Module):
                     if train:
                         tmp_img = cv2.resize(tmp_img, dsize=(256, 256))
                         gt_img = cv2.resize(gt_img, dsize=(256, 256))
-                        cv2.imwrite(os.path.join("./tmp_img_id66", str(self.idx) + "pred.png"), tmp_img)
-                        cv2.imwrite(os.path.join("./tmp_img_id66", str(self.idx) + "gt.png"), gt_img)
+                        cv2.imwrite(os.path.join("./tmp_img_id67", str(self.idx) + "pred.png"), tmp_img)
+                        cv2.imwrite(os.path.join("./tmp_img_id67", str(self.idx) + "gt.png"), gt_img)
                     self.idx += 1
                 self.idx = 0
 

@@ -223,43 +223,16 @@ class RecursiveCaptionDataset(data.Dataset):
         all_feat_file = raw_name + ".png"
         file_n = os.path.join(".", "ponnet_data", "center_future_frames", feat_file)
         all_feat_n = os.path.join(".", "ponnet_data", "16_center_future_frames", all_feat_file)
-        # with open(file_n, "rb") as f:
-        #     emb_feat = pickle.load(f)
-        #     print(emb_feat.shape)
-
-        # with open(all_feat_n, "rb") as f:
-        #     all_emb_feat = pickle.load(f)
+        fut_img = os.path.join(".", "ponnet_data", "4s_16_center_future_frames", feat_file)
 
         emb_feat = cv2.imread(file_n)
         emb_feat = torch.from_numpy(emb_feat.astype(np.float32)).clone()
         emb_feat = emb_feat.reshape(-1, 150528)
         # emb_feat = emb_feat.to('cpu').detach().numpy().copy()
         all_emb_feat = cv2.imread(all_feat_n)
+        fut_emb_feat = cv2.imread(fut_img)
 
-        # file_n = os.path.join(".", "ponnet_data", "frames_pkl", "_"  + raw_name)
-        # future_feat_n = os.path.join(".", "ponnet_data", "future_frames_pkl")
-        # emb_feat = []
-        # ln = nn.Linear(3072, 512)
-        # for idx in range(num_images):
-        #     file_name = os.path.join(file_n, "frame_" + str(idx) + ".pkl")
-        #     with open(file_name, "rb") as f:
-        #         feat = pickle.load(f)
-        #         # print("feat", feat.shape)
-        #     emb_feat.append(feat)
-        #     # print([len(v) for v in image_feats])
-        # # print(image_feats[-1].shape)
-        # emb_feat.append(emb_feat[-1])
-        # emb_feat = np.array(emb_feat)
-        # file_name_future = os.path.join(future_feat_n, raw_name + ".pkl")
-        # with open(file_name_future, "rb") as f:
-        #     all_emb_feat = pickle.load(f)
-        # emb_feat = torch.from_numpy(emb_feat.astype(np.float32)).clone()
-        # emb_feat = emb_feat.view(1, -1)
-        # emb_feat = ln(emb_feat)
-        # emb_feat = emb_feat.to('cpu').detach().numpy().copy()
-        # # print("emb_feat", emb_feat.shape)
-        # # print("all_emb_feat", all_emb_feat.shape)
-        return emb_feat, all_emb_feat
+        return emb_feat, all_emb_feat, fut_emb_feat
 
     def convert_example_to_features(self, example):
         """
@@ -278,7 +251,7 @@ class RecursiveCaptionDataset(data.Dataset):
         # raw_name: clip_id
         raw_name = example["clip_id"]
         # ver. future
-        emb_feat, all_emb_feat = self._load_ponnet_video_feature(
+        emb_feat, all_emb_feat, fut_emb_feat = self._load_ponnet_video_feature(
             raw_name
         )
         video_feature = emb_feat
@@ -290,7 +263,8 @@ class RecursiveCaptionDataset(data.Dataset):
             example["clip_id"],
             example["sentence"],
             video_feature,
-            gt_feat
+            gt_feat,
+            fut_emb_feat
         )
         # single_video_features: video特徴量を含むdict
         single_video_features.append(cur_data)
@@ -302,7 +276,8 @@ class RecursiveCaptionDataset(data.Dataset):
         name,
         sentence,
         video_feature,
-        gt_feat
+        gt_feat,
+        fut_emb_feat
     ):
         """
         make features for a single clip-sentence pair.
@@ -318,7 +293,7 @@ class RecursiveCaptionDataset(data.Dataset):
 
         # future
         feat, video_tokens, video_mask = self._load_indexed_video_feature(
-            video_feature, frm2sec
+            video_feature, frm2sec, fut_emb_feat
         )
         text_tokens, text_mask = self._tokenize_pad_sentence(sentence)
 
@@ -370,7 +345,7 @@ class RecursiveCaptionDataset(data.Dataset):
 
     # future
     def _load_indexed_video_feature(
-        self, raw_feat, frm2sec
+        self, raw_feat, frm2sec, fut_emb_feat
     ):
         """
         [CLS], [VID], ..., [VID], [SEP], [PAD], ..., [PAD],
@@ -398,7 +373,8 @@ class RecursiveCaptionDataset(data.Dataset):
         # includes [CLS], [SEP]
         feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))
         # feat[1:len(raw_feat) + 1] = raw_feat
-        feat[1:4] = raw_feat
+        feat[1] = raw_feat
+        feat[2:4] = fut_emb_feat
         # includes [CLS], [SEP]
         return feat, video_tokens, mask
 
