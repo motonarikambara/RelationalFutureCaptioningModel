@@ -187,12 +187,6 @@ class Translator(object):
 
             beam = copy.deepcopy(base_beam)  # copy global variable as local
 
-            # logger.info("batch_size {}, beam_size {}".format(len(input_ids_list[0]), beam_size))
-            # logger.info("input_ids {} {}".format(input_ids.shape, input_ids[:6]))
-            # logger.info("video_features {}".format(video_features.shape))
-            # logger.info("input_masks {} {}".format(input_masks.shape, input_masks[:6]))
-            # logger.info("token_type_ids {} {}".format(token_type_ids.shape, token_type_ids[:6]))
-
             for dec_idx in range(max_v_len, max_v_len + max_t_len):
                 # logger.info(" dec_idx {} beam.current_predictions {} {}"
                 #             .format(dec_idx, beam.current_predictions.shape, beam.current_predictions))
@@ -265,11 +259,6 @@ class Translator(object):
                 init_token_type_ids,
             )
 
-            # logger.info("beam.predictions {}".format(beam.predictions))
-            # logger.info("beam.scores {}".format(beam.scores))
-            # import sys
-            # sys.exit(1)
-            # return cur_ms, [e[0][0] for e in beam.predictions]
             return cur_ms, init_input_ids[:, max_v_len:]
 
         input_ids_list, input_masks_list = self.prepare_video_only_inputs(
@@ -304,18 +293,14 @@ class Translator(object):
         self,
         input_ids_list,
         video_features_list,
-        input_masks_list,
-        token_type_ids_list,
-        future_feat_list,
+        input_labels_list,
         rt_model,
     ):
         def greedy_decoding_step(
             prev_ms_,
             input_ids,
             video_features,
-            input_masks,
-            token_type_ids,
-            future_feat_list,
+            input_labels,
             model,
             max_v_len,
             max_t_len,
@@ -341,12 +326,9 @@ class Translator(object):
                 copied_prev_ms = copy.deepcopy(
                     prev_ms_
                 )  # since the func is changing data inside
-                _, pred_scores, _ = model.forward_step(
+                pred_scores = model.forward_step(
                     input_ids,
                     video_features,
-                    input_masks,
-                    token_type_ids,
-                    future_feat_list,
                 )
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10
@@ -362,9 +344,9 @@ class Translator(object):
                 input_ids[:, max_v_len:],
             )  # (N, max_t_len == L-max_v_len)
 
-        input_ids_list, input_masks_list = self.prepare_video_only_inputs(
-            input_ids_list, input_masks_list, token_type_ids_list
-        )
+        # input_ids_list, input_masks_list = self.prepare_video_only_inputs(
+        #     input_ids_list, input_masks_list, token_type_ids_list
+        # )
         for cur_input_masks in input_ids_list:
             assert (
                 torch.sum(cur_input_masks[:, self.cfg.max_v_len + 1 :]) == 0
@@ -380,9 +362,7 @@ class Translator(object):
                     prev_ms,
                     input_ids_list[idx],
                     video_features_list[idx],
-                    input_masks_list[idx],
-                    token_type_ids_list[idx],
-                    future_feat_list[idx],
+                    input_labels_list[idx],
                     rt_model,
                     config.max_v_len,
                     config.max_t_len,
@@ -528,18 +508,12 @@ class Translator(object):
                 # future
                 (
                     input_ids_list,
-                    video_features_list,
-                    input_masks_list,
-                    token_type_ids_list,
-                    future_feat_list,
+                    video_features_list
                 ) = model_inputs
                 return self.translate_batch_greedy(
                     input_ids_list,
                     video_features_list,
-                    input_masks_list,
-                    token_type_ids_list,
-                    future_feat_list,
-                    self.model,
+                    self.model
                 )
 
     @classmethod

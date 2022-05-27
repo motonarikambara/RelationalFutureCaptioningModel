@@ -117,50 +117,22 @@ class MartConfig(trainer_configs.BaseExperimentConfig):
         # more validation
         self.save_mode: str = config.pop("save_mode")
         self.use_beam: bool = config.pop("use_beam")
-        self.beam_size: int = config.pop("beam_size")
-        self.n_best: int = config.pop("n_best")
-        self.min_sen_len: int = config.pop("min_sen_len")
-        self.max_sen_len: int = config.pop("max_sen_len")
-        self.block_ngram_repeat: int = config.pop("block_ngram_repeat")
-        self.length_penalty_name: str = config.pop("length_penalty_name")
-        self.length_penalty_alpha: float = config.pop("length_penalty_alpha")
 
         # dataset
         self.max_n_sen: int = config.pop("max_n_sen")
-        self.max_n_sen_add_val: int = config.pop("max_n_sen_add_val")
         self.max_t_len: int = config.pop("max_t_len")
         self.max_v_len: int = config.pop("max_v_len")
-        self.type_vocab_size: int = config.pop("type_vocab_size")
-        self.word_vec_size: int = config.pop("word_vec_size")
-
-        # dataset: coot features
-        self.coot_model_name: Optional[str] = config.pop("coot_model_name")
-        self.coot_dim_clip: int = config.pop("coot_dim_clip")
-        self.coot_dim_vid: int = config.pop("coot_dim_vid")
-        self.coot_mode: str = config.pop("coot_mode")
-        self.video_feature_size: int = config.pop("video_feature_size")
+        self.num_img: int = config.pop("num_img")
 
         # technical
         self.debug: bool = config.pop("debug")
 
         # model
-        self.attention_probs_dropout_prob: float = config.pop(
-            "attention_probs_dropout_prob"
-        )
-        self.hidden_dropout_prob: float = config.pop("hidden_dropout_prob")
         self.hidden_size: int = config.pop("hidden_size")
-        self.intermediate_size: int = config.pop("intermediate_size")
-        self.layer_norm_eps: float = config.pop("layer_norm_eps")
-        self.memory_dropout_prob: float = config.pop("memory_dropout_prob")
-        self.num_attention_heads: int = config.pop("num_attention_heads")
-        self.num_hidden_layers: int = config.pop("num_hidden_layers")
-        self.n_memory_cells: int = config.pop("n_memory_cells")
-        self.share_wd_cls_weight: bool = config.pop("share_wd_cls_weight")
-        self.recurrent: bool = config.pop("recurrent")
-        self.untied: bool = config.pop("untied")
-        self.mtrans: bool = config.pop("mtrans")
-        self.xl: bool = config.pop("xl")
-        self.xl_grad: bool = config.pop("xl_grad")
+        self.enc_num_layers: int = config.pop("enc_num_layers")
+        self.dec_num_layers: int = config.pop("dec_num_layers")
+        self.vocab_size: int = config.pop("vocab_size")
+        self.max_seq_length: int = config.pop("max_seq_length")
         self.use_glove: bool = config.pop("use_glove")
         self.freeze_glove: bool = config.pop("freeze_glove")
 
@@ -169,8 +141,6 @@ class MartConfig(trainer_configs.BaseExperimentConfig):
         self.initializer_range: float = config.pop("initializer_range")
         self.lr: float = config.pop("lr")
         self.lr_warmup_proportion: float = config.pop("lr_warmup_proportion")
-        self.infty: int = config.pop("infty", 0)
-        self.eps: float = config.pop("eps", 1e-6)
 
         # max position embeddings is calculated as the max joint sequence length
         self.max_position_embeddings: int = self.max_v_len + self.max_t_len
@@ -178,19 +148,8 @@ class MartConfig(trainer_configs.BaseExperimentConfig):
         # must be set manually as it depends on the dataset
         self.vocab_size: Optional[int] = None
 
-        # assert the config is valid
-        if self.xl:
-            assert self.recurrent, "recurrent must be True if TransformerXL is used."
-        if self.xl_grad:
-            assert self.xl, "xl must be True when using xl_grad"
-        assert not (self.recurrent and self.untied), "cannot be True for both"
-        assert not (self.recurrent and self.mtrans), "cannot be True for both"
-        assert not (self.untied and self.mtrans), "cannot be True for both"
-        if self.share_wd_cls_weight:
-            assert self.word_vec_size == self.hidden_size, (
-                "hidden size has to be the same as word embedding size when "
-                "sharing the word embedding weight and the final classifier weight"
-            )
+        self.recurrent = True
+        self.xl_grad = self.xl = False
 
         # infer model type
         if self.recurrent:  # recurrent paragraphs

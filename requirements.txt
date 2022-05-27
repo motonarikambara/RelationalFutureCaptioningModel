@@ -15,3 +15,5 @@ mypy # typing
 # pylint # linter
 pycocoevalcap # text evaluation # alternative: # pip install git+https://github.com/salaniz/pycocoevalcap
 nltk
+wandb
+opencv-python

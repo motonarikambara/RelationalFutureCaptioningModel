@@ -1,0 +1,77 @@
+description: ""
+config_type: "mart"
+use_beam: false
+# ---------- Training ----------
+train:
+    batch_size: 16
+    num_epochs: 25
+    loss_func: "crossentropy"
+    clip_gradient: 1
+label_smoothing: 0.1
+# ---------- Validation ----------
+val:
+    batch_size: 64
+    val_freq: 1
+    val_start: 0
+    det_best_field: "cider"
+    det_best_compare_mode: "max"
+    det_best_threshold_mode: "rel"
+    det_best_threshold_value: 1e-4
+    det_best_terminate_after: 10
+save_mode: "best"
+# ---------- Dataset / Dataloader ----------
+dataset_train:
+    name: "ponnet"
+    data_type: "auto"
+    subset: "default"
+    split: "train"
+    max_datapoints: -1
+    shuffle: true
+    pin_memory: true
+    num_workers: 4
+    drop_last: false
+    preload: false
+dataset_val:
+    same_as: "dataset_train"
+    shuffle: false
+    split: "val"
+max_t_len: 25
+max_v_len: 5
+max_n_sen: 5
+# ---------- Technical ----------
+random_seed: null
+use_cuda: true
+debug: false
+cudnn_enabled: true
+cudnn_benchmark: true
+cudnn_deterministic: false
+use_multi_gpu: false
+cuda_non_blocking: true
+fp16_train: false # this will create NaN in the backward pass!
+fp16_val: false
+# ---------- Model ----------
+use_glove: true
+freeze_glove: false
+enc_num_layers: 2
+dec_num_layers: 1
+vocab_size: 130
+hidden_size: 1024
+max_seq_length: 25
+num_img: 5
+# ---------- Optimization ----------
+ema_decay: 0.9999
+initializer_range: 0.02
+lr: 0.0001
+lr_warmup_proportion: 0.1
+# ---------- Logging ----------
+logging:
+    step_train: 10
+    step_val: 10
+    step_gpu: -1
+    step_gpu_once: 10
+# ---------- Saving ----------
+saving:
+    keep_freq: -1
+    save_last: true
+    save_best: true
+    save_opt_state: true

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import h5py
+import pickle
 import nltk
 import numpy as np
 import torch
@@ -16,6 +17,7 @@ from torch.utils import data
 from torch.utils.data.dataloader import default_collate
 from tqdm import tqdm
 import sys
+import cv2
 
 from mart.configs_mart import MartConfig, MartPathConst
 from nntrainer.typext import ConstantHolder
@@ -29,6 +31,37 @@ class DataTypesConstCaption(ConstantHolder):
 
     VIDEO_FEAT = "video_feat"
     COOT_EMB = "coot_emb"
+
+
+def make_dict(train_caption_file, word2idx_filepath):
+    max_words = 0
+    with open(train_caption_file) as f:
+        sentence_dict = json.load(f)
+    sentence_list = []
+    for sample in sentence_dict:
+        sentence_list.append(sample["sentence"])
+    words = []
+    for sent in sentence_list:
+        word_list = nltk.tokenize.word_tokenize(sent)
+        max_words = max(max_words, len(word_list))
+        words.extend(word_list)
+
+    # default dict
+    word2idx_dict =\
+        {"[PAD]": 0, "[CLS]": 1, "[SEP]": 2, "[VID]": 3, "[BOS]": 4, "[EOS]": 5, "[UNK]": 6}
+    word_idx = 7
+
+    # 辞書の作成
+    for word in words:
+        if word not in word2idx_dict:
+            word2idx_dict[word] = word_idx
+            word_idx += 1
+
+    # 辞書ファイルの作成
+    with open(word2idx_filepath, "w") as f:
+        json.dump(word2idx_dict, f, indent=0)
+
+    return max_words
 
 
 class RecursiveCaptionDataset(data.Dataset):
@@ -70,6 +103,7 @@ class RecursiveCaptionDataset(data.Dataset):
         coot_feat_dir="provided_embeddings",
         dataset_max: Optional[int] = None,
         preload: bool = False,
+        num_img = 5,
     ):
         # metadata settings
         self.dset_name = dset_name
@@ -86,12 +120,6 @@ class RecursiveCaptionDataset(data.Dataset):
         duration_file = "captioning_video_feat_duration.csv"
         self.video_feature_dir = Path(video_feature_dir) / self.dset_name
         self.duration_file = self.annotations_dir / self.dset_name / duration_file
-        self.word2idx_file = (
-            self.annotations_dir / self.dset_name / "mart_word2idx.json"
-        )
-        self.word2idx = json.load(self.word2idx_file.open("rt", encoding="utf8"))
-        self.idx2word = {int(v): k for k, v in list(self.word2idx.items())}
-        print(f"WORD2IDX: {self.word2idx_file} len {len(self.word2idx)}")
 
         # Parameters for sequence lengths
         self.max_seq_len = max_v_len + max_t_len
@@ -113,123 +141,56 @@ class RecursiveCaptionDataset(data.Dataset):
         # ---------- Load metadata ----------
 
         # determine metadata file
-        if self.dset_name == "youcook2_next":
-            tmp_path = "youcook2_next"
-            if mode == "train":  # 1333 videos
-                # data_path = self.annotations_dir / self.dset_name / "captioning_train.json"
-                data_path = self.annotations_dir / tmp_path / "captioning_train.json"
-            elif mode == "val":  # 457 videos
-                # data_path = self.annotations_dir / self.dset_name / "captioning_val.json"
-                data_path = self.annotations_dir / tmp_path / "captioning_val2.json"
-            elif mode == "test":
-                data_path = self.annotations_dir / tmp_path / "captioning_val.json"
-                # mode = "val"
-                # self.mode = "val"
-            else:
-                raise ValueError(
-                    f"Mode must be [train, val] for {self.dset_name}, got {mode}"
-                )
+        tmp_path = "ponnet"
+        if mode == "train":  # 1333 videos
+            data_path = self.annotations_dir / tmp_path / "captioning_train.json"
+        elif mode == "val":  # 457 videos
+            data_path = self.annotations_dir / tmp_path / "captioning_val.json"
+        elif mode == "test":  # 457 videos
+            data_path = self.annotations_dir / tmp_path / "captioning_test.json"
+            mode = "val"
+            self.mode = "val"
         else:
-            raise ValueError(f"Unknown dataset {self.dset_name}")
+            raise ValueError(
+                f"Mode must be [train, val] for {self.dset_name}, got {mode}"
+            )
+
+        self.word2idx_file = (
+            self.annotations_dir / self.dset_name / "ponnet_word2idx.json"
+        )
+        if not os.path.exists(self.word2idx_file):
+            max_words = make_dict(data_path, self.word2idx_file)
+        self.word2idx = json.load(self.word2idx_file.open("rt", encoding="utf8"))
+        self.idx2word = {int(v): k for k, v in list(self.word2idx.items())}
+        print(f"WORD2IDX: {self.word2idx_file} len {len(self.word2idx)}")
 
         # load and process captions and video data
-        raw_data = json.load(data_path.open("rt", encoding="utf8"))
+        # clip_id, sentence
+        with open(data_path) as f:
+            raw_data = json.load(f)
         coll_data = []
-        for i, (k, line) in enumerate(tqdm(list(raw_data.items()))):
-            if dataset_max is not None and i >= dataset_max > 0:
-                break
-            line["name"] = k
-            # line["timestamps"] = line["timestamps"][:self.max_n_sen]
-            # line["sentences"] = line["sentences"][:self.max_n_sen]
+        for line in tqdm(raw_data):
             coll_data.append(line)
-
-        if self.recurrent:  # recurrent
-            self.data = coll_data
-        else:  # non-recurrent single sentence
-            single_sentence_data = []
-            for d in coll_data:
-                num_sen = min(self.max_n_sen, len(d["sentences"]))
-                single_sentence_data.extend(
-                    [
-                        {
-                            "duration": d["duration"],
-                            "name": d["name"],
-                            "timestamp": d["timestamps"][idx],
-                            "sentence": d["sentences"][idx],
-                            "idx": idx,
-                        }
-                        for idx in range(num_sen)
-                    ]
-                )
-            self.data = single_sentence_data
+        self.data = coll_data
 
         # ---------- Load video data ----------
 
         # Decide whether to load COOT embeddings or video features
-        if self.coot_model_name is not None:
-            # COOT embeddings
-            self.data_type = DataTypesConstCaption.COOT_EMB
+        # COOT embeddings
+        self.data_type = DataTypesConstCaption.COOT_EMB
+        # map video id and clip id to clip number
+        self.clip_nums = []
+        for clip in tqdm(range(len(self.data))):
+            self.clip_nums.append(str(clip))
 
-            # for activitynet, coot val split contains both ae-val and ae-test splits
-            if self.mode == "val":
-                coot_dataset_mode = "train"
-            elif self.mode == "test":
-                coot_dataset_mode = "val" 
-            else:
-                coot_dataset_mode = "train"
-            self.coot_emb_h5_file = (
-                self.coot_feat_dir / f"{self.coot_model_name}_{coot_dataset_mode}.h5"
-            )
-            assert (
-                self.coot_emb_h5_file.is_file()
-            ), f"Coot embeddings file not found: {self.coot_emb_h5_file}"
-
-            # load coot embeddings data
-            data_file = h5py.File(self.coot_emb_h5_file, "r")
-
-            if "key" not in data_file:
-                # backwards compatible to old h5+json embeddings
-                vtdata = json.load(
-                    (self.coot_feat_dir / f"{self.coot_model_name}_{mode}.json").open(
-                        "rt", encoding="utf8"
-                    )
-                )
-                clip_nums = vtdata["clip_nums"]
-                vid_ids = vtdata["vid_ids"]
-                clip_ids = vtdata["clip_ids"]
-            else:
-                # new version, everything in the h5
-                # decode video ids from byte to utf8
-                # for note PC
-                vid_ids = [key.decode("utf8") for key in data_file["key"]]
-                # for desktop
-                # vid_ids = [key for key in data_file["key"]]
-
-                # load clip information
-                clip_nums = data_file["clip_num"]
-                clip_ids = []
-                assert len(vid_ids) == len(clip_nums)
-                for vid_id, clip_num in zip(vid_ids, clip_nums):
-                    for c in range(clip_num):
-                        clip_ids.append((vid_id, c))
-            self.coot_clip_nums = np.array(clip_nums)
-            # map video id to video number
-            self.coot_vid_id_to_vid_number = {}
-            for i, vid_id in enumerate(vid_ids):
-                self.coot_vid_id_to_vid_number[vid_id] = i
-
-            # map video id and clip id to clip number
-            self.coot_idx_to_clip_number = {}
-            for i, (vid_id, clip_id) in enumerate(clip_ids):
-                self.coot_idx_to_clip_number[f"{vid_id}/{clip_id}"] = i
-
-            self.frame_to_second = None  # Don't need this for COOT embeddings
+        self.frame_to_second = None  # Don't need this for COOT embeddings
 
         print(
             f"Dataset {self.dset_name} #{len(self)} {self.mode} input {self.data_type}"
         )
 
         self.preloading_done = False
+        self.num_img = num_img
 
     def __len__(self):
         return len(self.data)
@@ -238,33 +199,11 @@ class RecursiveCaptionDataset(data.Dataset):
         items, meta = self.convert_example_to_features(self.data[index])
         return items, meta
 
-    def _load_mart_video_feature(self, raw_name: str) -> np.array:
-        """
-        Load given mart video feature
-        Args:
-            raw_name: Video ID
-        Returns:
-            Mart video feature with shape (len_sequence, 3072)
-        """
-        if self.preload and self.preloading_done:
-            return self.preloaded_videos[raw_name]
-        video_name = raw_name[2:] if self.dset_name == "activitynet" else raw_name
-        feat_path_resnet = os.path.join(
-            self.video_feature_dir, "{}_resnet.npy".format(video_name)
-        )
-        feat_path_bn = os.path.join(
-            self.video_feature_dir, "{}_bn.npy".format(video_name)
-        )
-        video_feature = np.concatenate(
-            [np.load(feat_path_resnet), np.load(feat_path_bn)], axis=1
-        )
-        return video_feature
-
-    def _load_coot_video_feature(
+    def _load_ponnet_video_feature(
         self, raw_name: str
     ) -> Tuple[np.array, np.array, List[np.array]]:
         """
-        Load given COOT video features.
+        Load given S3D video features.
         Args:
             raw_name: Video ID
         Returns:
@@ -273,148 +212,59 @@ class RecursiveCaptionDataset(data.Dataset):
                 context with shape (dim_clip)
                 clips with shape (dim_clip)
         """
-        if self.preload and self.preloading_done:
-            return self.preloaded_videos[raw_name]
-        try:
-            # load video with default name
-            vid_num = self.coot_vid_id_to_vid_number[raw_name]
-            fixed_name = raw_name
-        except KeyError:
-            # not found, have to modify the name for activitynet
-            mode = "val_1" if self.mode == "val" else self.mode
-            fixed_name = f"{raw_name[2:]}_{mode}"
-            vid_num = self.coot_vid_id_to_vid_number[fixed_name]
-        h5 = h5py.File(self.coot_emb_h5_file, "r")
-
-        if "vid_emb" not in h5:
-            # backwards compatibility
-            embs = [
-                "vid_norm",
-                "vid",
-                "clip_norm",
-                "clip",
-                "vid_ctx_norm",
-                "vid_ctx",
-                "par_norm",
-                "par",
-                "sent_norm",
-                "sent",
-                "par_ctx_norm",
-                "par_ctx",
-            ]
-            (
-                f_vid_emb,
-                f_vid_emb_before_norm,
-                f_clip_emb,
-                f_clip_emb_before_norm,
-                f_vid_context,
-                f_vid_context_before_norm,
-                f_par_emb,
-                f_par_emb_before_norm,
-                f_sent_emb,
-                f_sent_emb_before_norm,
-                f_par_context,
-                f_par_context_before_norm,
-            ) = embs
-        else:
-            # new version
-            (
-                f_vid_emb,
-                f_clip_emb,
-                f_vid_context,
-                f_par_emb,
-                f_sent_emb,
-                f_par_context,
-            ) = [
-                "vid_emb",
-                "clip_emb",
-                "vid_context",
-                "par_emb",
-                "sent_emb",
-                "par_context",
-            ]
-
         # 動画に関する特徴量を取得
-        num_clips = self.coot_clip_nums[vid_num]
-        clip_feats = []
-        future_feats = []
-        past_feats = []
-        for clip in range(num_clips - 1):
-            clip_idx = self.coot_idx_to_clip_number[f"{fixed_name}/{clip}"]
-            past_num = clip - 1
-            future_num = clip + 1
-            clip_feat = np.array(h5[f_clip_emb][clip_idx])
-            future_idx = self.coot_idx_to_clip_number[f"{fixed_name}/{future_num}"]
-            future_feat = np.array(h5[f_clip_emb][future_idx])
-            if past_num >= 0:
-                past_idx = self.coot_idx_to_clip_number[f"{fixed_name}/{past_num}"]
-            else:
-                past_idx = clip_idx
-            past_feat = np.array(h5[f_clip_emb][past_idx])
-            clip_feats.append(clip_feat)
-            past_feats.append(past_feat)
-            future_feats.append(future_feat)
-        clip_feats = np.stack(clip_feats, axis=0)
-        past_feats = np.stack(past_feats, axis=0)
-        future_feats = np.stack(future_feats, axis=0)
-        # ver. future
-        return clip_feats, past_feats, future_feats
+        frame_dir = "_" + raw_name
+        file_n = os.path.join(".", "ponnet_data", "frames", frame_dir)
+        feats = []
+        for i in range(self.num_img):
+            file_name = "frames_" + str(i) + ".png"
+            img_path = os.path.join(file_n, file_name)
+
+            image = cv2.imread(img_path)
+            emb_feat = cv2.resize(image, (224, 224))
+            feats.append(emb_feat)
+        feats = np.array(feats)
+        return feats
 
     def convert_example_to_features(self, example):
         """
         example single snetence
-        {"name": str,
+        {"clip_id": str,
          "duration": float,
          "timestamp": [st(float), ed(float)],
          "sentence": str
         } or
-        {"name": str,
+        {"clip_id": str,
          "duration": float,
          "timestamps": list([st(float), ed(float)]),
          "sentences": list(str)
         }
         """
-        raw_name = example["name"]
-        if self.data_type == DataTypesConstCaption.VIDEO_FEAT:
-            # default video features from MART paper
-            video_feature = self._load_mart_video_feature(raw_name)
-        else:
-            # ver. future
-            clip_feats, past_feats, future_feats = self._load_coot_video_feature(
-                raw_name
-            )
-            video_feature = clip_feats
-
-        # recurrent
-        num_sen = len(example["sentences"])
+        # raw_name: clip_id
+        raw_name = example["clip_id"]
+        # ver. future
+        emb_feat = self._load_ponnet_video_feature(
+            raw_name
+        )
+        video_feature = emb_feat
         single_video_features = []
         single_video_meta = []
-        for clip_idx in range(num_sen):
-            # cur_data:video特徴量を含むdict
-            cur_data, cur_meta = self.clip_sentence_to_feature(
-                example["name"],
-                example["timestamps"][clip_idx],
-                example["sentences"][clip_idx],
-                video_feature,
-                past_feats,
-                future_feats,
-                clip_idx,
-            )
-            # single_video_features: video特徴量を含むdict
-            single_video_features.append(cur_data)
-            single_video_meta.append(cur_meta)
+        # cur_data:video特徴量を含むdict
+        cur_data, cur_meta = self.clip_sentence_to_feature(
+            example["clip_id"],
+            example["sentence"],
+            video_feature
+        )
+        # single_video_features: video特徴量を含むdict
+        single_video_features.append(cur_data)
+        single_video_meta.append(cur_meta)
         return single_video_features, single_video_meta
 
-    # ver. future
     def clip_sentence_to_feature(
         self,
         name,
-        timestamp,
         sentence,
-        video_feature,
-        past_feats,
-        future_feats,
-        clip_idx: int,
+        video_feature
     ):
         """
         make features for a single clip-sentence pair.
@@ -427,97 +277,29 @@ class RecursiveCaptionDataset(data.Dataset):
             clip_idx: clip number in the video (needed to loat COOT features)
         """
         frm2sec = None
-        if self.data_type == DataTypesConstCaption.VIDEO_FEAT:
-            frm2sec = (
-                self.frame_to_second[name[2:]]
-                if self.dset_name == "activitynet"
-                else self.frame_to_second[name]
-            )
 
         # future
-        feat, video_tokens, video_mask, future_clips = self._load_indexed_video_feature(
-            video_feature, timestamp, frm2sec, clip_idx, past_feats, future_feats
+        feat, video_mask = self._load_indexed_video_feature(
+            video_feature, frm2sec
         )
         text_tokens, text_mask = self._tokenize_pad_sentence(sentence)
-
-        input_tokens = video_tokens + text_tokens
-
         input_ids = [
-            self.word2idx.get(t, self.word2idx[self.UNK_TOKEN]) for t in input_tokens
+            self.word2idx.get(t, self.word2idx[self.UNK_TOKEN]) for t in text_tokens
         ]
         # shifted right, `-1` is ignored when calculating CrossEntropy Loss
-        input_labels = (
-            [self.IGNORE] * len(video_tokens)
-            + [
-                self.IGNORE if m == 0 else tid
-                for tid, m in zip(input_ids[-len(text_mask) :], text_mask)
-            ][1:]
-            + [self.IGNORE]
-        )
-        input_mask = video_mask + text_mask
-        token_type_ids = [0] * self.max_v_len + [1] * self.max_t_len
 
         # ver. future
         coll_data = dict(
             name=name,
-            input_tokens=input_tokens,
             input_ids=np.array(input_ids).astype(np.int64),
-            input_labels=np.array(input_labels).astype(np.int64),
-            input_mask=np.array(input_mask).astype(np.float32),
-            token_type_ids=np.array(token_type_ids).astype(np.int64),
-            video_feature=feat.astype(np.float32),
-            future_clips=future_clips.astype(np.float32),
+            video_feature=feat.astype(np.float32)
         )
-        meta = dict(name=name, timestamp=timestamp, sentence=sentence)
+        meta = dict(name=name, sentence=sentence)
         return coll_data, meta
-
-    @classmethod
-    def _convert_to_feat_index_st_ed(cls, feat_len, timestamp, frm2sec):
-        """
-        convert wall time st_ed to feature index st_ed
-        """
-        st = int(math.floor(timestamp[0] / frm2sec))
-        ed = int(math.ceil(timestamp[1] / frm2sec))
-        ed = min(ed, feat_len - 1)
-        st = min(st, ed - 1)
-        assert st <= ed <= feat_len, "st {} <= ed {} <= feat_len {}".format(
-            st, ed, feat_len
-        )
-        return st, ed
-
-    # future
-    def _get_vt_features(
-        self, video_feat_tuple, clip_idx, max_v_l, past_feats, future_feats
-    ):
-        # ひとまとめにしたvideo関連の特徴量から必要なものを抽出
-        clip_feats = video_feat_tuple
-        clip_feat = clip_feats[clip_idx]
-        future_feat = future_feats[clip_idx]
-        past_feat = past_feats[clip_idx]
-        # only clip (1, 384)
-        valid_l = 0
-        feat = np.zeros((max_v_l, self.coot_dim_clip))
-        feat[valid_l] = clip_feat
-
-        past = np.zeros((max_v_l, self.coot_dim_clip))
-        past[valid_l] = past_feat
-
-        future = np.zeros((max_v_l, self.coot_dim_clip))
-        future[valid_l] = future_feat
-
-        # future = np.zeros((max_v_l, self.coot_dim_clip))
-        # future[valid_l] = future_feat
-        valid_l += 1
-        # print("CLIP")
-
-        assert valid_l == max_v_l, f"valid {valid_l} max {max_v_l}"
-        # return feat, valid_l
-        # future
-        return feat, valid_l, past, future
 
     # future
     def _load_indexed_video_feature(
-        self, raw_feat, timestamp, frm2sec, clip_idx, past_feats, future_feats
+        self, raw_feat, frm2sec
     ):
         """
         [CLS], [VID], ..., [VID], [SEP], [PAD], ..., [PAD],
@@ -530,32 +312,11 @@ class RecursiveCaptionDataset(data.Dataset):
         # COOT video text data as input
         max_v_l = self.max_v_len - 2
         # future
-        raw_feat, valid_l, past, future = self._get_vt_features(
-            raw_feat, clip_idx, max_v_l, past_feats, future_feats
-        )
-        video_tokens = (
-            [self.CLS_TOKEN]
-            + [self.VID_TOKEN] * valid_l
-            + [self.SEP_TOKEN]
-            + [self.PAD_TOKEN] * (max_v_l - valid_l)
-        )
-        mask = [1] * (valid_l + 2) + [0] * (max_v_l - valid_l)
-        # 上記のように特徴量を配置
+        mask = 0
         # feat∈25×1152
         # includes [CLS], [SEP]
-        feat = np.zeros((self.max_v_len + self.max_t_len, raw_feat.shape[1]))
-        # feat[1:len(raw_feat) + 1] = raw_feat
-        feat[1:4] = raw_feat
-        # future
         # includes [CLS], [SEP]
-        future_feat = np.zeros((2, past_feats.shape[1]))
-        future_feat[0] = past
-        future_feat[1] = future
-
-        # feat = raw_feat
-        # return feat, video_tokens, mask
-        # future
-        return feat, video_tokens, mask, future_feat
+        return raw_feat, mask
 
     def _tokenize_pad_sentence(self, sentence):
         """
@@ -564,12 +325,14 @@ class RecursiveCaptionDataset(data.Dataset):
         All non-PAD values are valid, with a mask value of 1
         """
         max_t_len = self.max_t_len
+
+        # 文を単語区切りにする
         sentence_tokens = nltk.tokenize.word_tokenize(sentence.lower())[: max_t_len - 2]
         sentence_tokens = [self.BOS_TOKEN] + sentence_tokens + [self.EOS_TOKEN]
 
         # pad
         valid_l = len(sentence_tokens)
-        mask = [1] * valid_l + [0] * (max_t_len - valid_l)
+        mask = 0
         sentence_tokens += [self.PAD_TOKEN] * (max_t_len - valid_l)
         return sentence_tokens, mask
 
@@ -605,61 +368,46 @@ class RecursiveCaptionDataset(data.Dataset):
             batch:
         Returns:
         """
-        if self.recurrent:
-            # recurrent collate function. original docstring:
-            # HOW to batch clip-sentence pair? 1) directly copy the last
-            # sentence, but do not count them in when
-            # back-prop OR put all -1 to their text token label, treat
-
-            # collect meta
-            raw_batch_meta = [e[1] for e in batch]
-            batch_meta = []
-            for e in raw_batch_meta:
-                cur_meta = dict(name=None, timestamp=[], gt_sentence=[])
-                for d in e:
-                    cur_meta["name"] = d["name"]
-                    cur_meta["timestamp"].append(d["timestamp"])
-                    cur_meta["gt_sentence"].append(d["sentence"])
-                batch_meta.append(cur_meta)
-
-            batch = [e[0] for e in batch]
-            # Step1: pad each example to max_n_sen
-            max_n_sen = max([len(e) for e in batch])
-            raw_step_sizes = []
-
-            padded_batch = []
-            padding_clip_sen_data = copy.deepcopy(
-                batch[0][0]
-            )  # doesn"t matter which one is used
-            padding_clip_sen_data["input_labels"][:] = RecursiveCaptionDataset.IGNORE
-            for ele in batch:
-                cur_n_sen = len(ele)
-                if cur_n_sen < max_n_sen:
-                    # noinspection PyAugmentAssignment
-                    ele = ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
-                raw_step_sizes.append(cur_n_sen)
-                padded_batch.append(ele)
-
-            # Step2: batching each steps individually in the batches
-            collated_step_batch = []
-            for step_idx in range(max_n_sen):
-                collated_step = step_collate([e[step_idx] for e in padded_batch])
-                collated_step_batch.append(collated_step)
-            return collated_step_batch, raw_step_sizes, batch_meta
-
-        # single sentences / untied
+        # recurrent collate function. original docstring:
+        # HOW to batch clip-sentence pair? 1) directly copy the last
+        # sentence, but do not count them in when
+        # back-prop OR put all -1 to their text token label, treat
 
         # collect meta
-        batch_meta = [
-            {
-                "name": e[1]["name"],
-                "timestamp": e[1]["timestamp"],
-                "gt_sentence": e[1]["sentence"],
-            }
-            for e in batch
-        ]  # change key
-        padded_batch = step_collate([e[0] for e in batch])
-        return padded_batch, None, batch_meta
+        raw_batch_meta = [e[1] for e in batch]
+        batch_meta = []
+        for e in raw_batch_meta:
+            cur_meta = dict(name=None, timestamp=[], gt_sentence=[])
+            for d in e:
+                cur_meta["clip_id"] = d["name"]
+                cur_meta["gt_sentence"].append(d["sentence"])
+            batch_meta.append(cur_meta)
+
+        batch = [e[0] for e in batch]
+        # Step1: pad each example to max_n_sen
+        max_n_sen = max([len(e) for e in batch])
+        raw_step_sizes = []
+
+        padded_batch = []
+        padding_clip_sen_data = copy.deepcopy(
+            batch[0][0]
+        )  # doesn"t matter which one is used
+        # padding_clip_sen_data["input_labels"][:] =\
+            # RecursiveCaptionDataset.IGNORE
+        for ele in batch:
+            cur_n_sen = len(ele)
+            if cur_n_sen < max_n_sen:
+                # noinspection PyAugmentAssignment
+                ele = ele + [padding_clip_sen_data] * (max_n_sen - cur_n_sen)
+            raw_step_sizes.append(cur_n_sen)
+            padded_batch.append(ele)
+
+        # Step2: batching each steps individually in the batches
+        collated_step_batch = []
+        for step_idx in range(max_n_sen):
+            collated_step = step_collate([e[step_idx] for e in padded_batch])
+            collated_step_batch.append(collated_step)
+        return collated_step_batch, raw_step_sizes, batch_meta
 
 
 def prepare_batch_inputs(batch, use_cuda: bool, non_blocking=False):
@@ -705,12 +453,12 @@ def create_mart_datasets_and_loaders(
         cfg.max_n_sen,
         mode="train",
         recurrent=cfg.recurrent,
-        untied=cfg.untied or cfg.mtrans,
+        untied= False,
         video_feature_dir=video_feature_dir,
-        coot_model_name=cfg.coot_model_name,
-        coot_mode=cfg.coot_mode,
-        coot_dim_vid=cfg.coot_dim_vid,
-        coot_dim_clip=cfg.coot_dim_clip,
+        coot_model_name=None,
+        coot_mode=None,
+        coot_dim_vid=0,
+        coot_dim_clip=0,
         annotations_dir=annotations_dir,
         coot_feat_dir=coot_feat_dir,
         dataset_max=cfg.dataset_train.max_datapoints,
@@ -726,12 +474,12 @@ def create_mart_datasets_and_loaders(
         max_n_sen_val,
         mode="val",
         recurrent=cfg.recurrent,
-        untied=cfg.untied or cfg.mtrans,
+        untied=False,
         video_feature_dir=video_feature_dir,
-        coot_model_name=cfg.coot_model_name,
-        coot_mode=cfg.coot_mode,
-        coot_dim_vid=cfg.coot_dim_vid,
-        coot_dim_clip=cfg.coot_dim_clip,
+        coot_model_name=None,
+        coot_mode=None,
+        coot_dim_vid=0,
+        coot_dim_clip=0,
         annotations_dir=annotations_dir,
         coot_feat_dir=coot_feat_dir,
         dataset_max=cfg.dataset_val.max_datapoints,
@@ -761,12 +509,12 @@ def create_mart_datasets_and_loaders(
         max_n_sen_val,
         mode="test",
         recurrent=cfg.recurrent,
-        untied=cfg.untied or cfg.mtrans,
+        untied=False,
         video_feature_dir=video_feature_dir,
-        coot_model_name=cfg.coot_model_name,
-        coot_mode=cfg.coot_mode,
-        coot_dim_vid=cfg.coot_dim_vid,
-        coot_dim_clip=cfg.coot_dim_clip,
+        coot_model_name=None,
+        coot_mode=None,
+        coot_dim_vid=0,
+        coot_dim_clip=0,
         annotations_dir=annotations_dir,
         coot_feat_dir=coot_feat_dir,
         dataset_max=cfg.dataset_val.max_datapoints,
@@ -781,5 +529,5 @@ def create_mart_datasets_and_loaders(
         pin_memory=cfg.dataset_val.pin_memory,
     )
 
-    # return train_dataset, val_dataset, train_loader, val_loader
+
     return train_dataset, val_dataset, train_loader, val_loader, test_dataset, test_loader

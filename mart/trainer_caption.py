@@ -39,6 +39,7 @@ from nntrainer.metric import (
 from nntrainer.models import BaseModelManager
 from nntrainer.trainer_configs import BaseTrainerState
 from nntrainer.utils import TrainerPathConst
+import wandb
 
 
 def cal_performance(pred, gold):
@@ -76,11 +77,9 @@ class MartFilesHandler(ExperimentFilesHandler):
     def get_translation_files(self, epoch: Union[int, str], split: str) -> Path:
         """
         Get all file paths for storing translation results and evaluation.
-
         Args:
             epoch: Epoch.
             split: dataset split (val, test)
-
         Returns:
             Path to store raw model output and ground truth.
         """
@@ -92,10 +91,8 @@ class MartFilesHandler(ExperimentFilesHandler):
     def setup_dirs(self, *, reset: bool = False) -> None:
         """
         Call super class to setup directories and additionally create the caption folder.
-
         Args:
             reset:
-
         Returns:
         """
         super().setup_dirs(reset=reset)
@@ -122,11 +119,9 @@ class MartTrainerState(BaseTrainerState):
 class MartTrainer(trainer_base.BaseTrainer):
     """
     Trainer for retrieval.
-
     Notes:
         The parent TrainerBase takes care of all the basic stuff: Setting up directories and logging,
         determining device and moving models to cuda, setting up checkpoint loading and metrics.
-
     Args:
         cfg: Loaded configuration instance.
         model: Model.
@@ -232,6 +227,7 @@ class MartTrainer(trainer_base.BaseTrainer):
         self.optimizer = None
         self.lr_scheduler = None
         self.ema = EMA(cfg.ema_decay)
+        self.best_epoch = 0
         # skip optimizer if not training
         if not self.is_test:
             # Prepare optimizer
@@ -271,7 +267,6 @@ class MartTrainer(trainer_base.BaseTrainer):
                 lr=cfg.lr,
                 warmup=cfg.lr_warmup_proportion,
                 t_total=num_train_optimization_steps,
-                e=cfg.eps,
                 schedule="warmup_linear",
             )
 
@@ -293,28 +288,37 @@ class MartTrainer(trainer_base.BaseTrainer):
         if self.load_model or cfg.ema_decay <= 0:
             self.ema = None
 
-        self.beforeloss = 1000.0
         self.train_steps = 0
         self.val_steps = 0
         self.test_steps = 0
+        self.beforeloss = 0.0
+        self.wandb_flag = 0
 
     def train_model(
         self, train_loader: data.DataLoader, val_loader: data.DataLoader, test_loader
     ) -> None:
         """
         Train epochs until done.
-
         Args:
             train_loader: Training dataloader.
             val_loader: Validation dataloader.
         """
-        loss_delta = 1000.0
+        while(True):
+            self.wandb_flag = int(input("Use wandb\n Yes: 1, No: 0\n"))
+            if self.wandb_flag == 1:
+                wandb_name = input("please input project name : ")
+                wandb.init(name=wandb_name, project="mart")
+                break
+            elif self.wandb_flag == 0:
+                break
+            else:
+                continue
         self.hook_pre_train()  # pre-training hook: time book-keeping etc.
         self.steps_per_epoch = len(train_loader)  # save length of epoch
 
         # ---------- Epoch Loop ----------
         for _epoch in tqdm(range(self.state.current_epoch, self.cfg.train.num_epochs)):
-            # if self.check_early_stop(loss_delta):
+            # if self.check_early_stop():
             #     break
             self.hook_pre_train_epoch()  # pre-epoch hook: set models to train, time book-keeping
 
@@ -334,7 +338,7 @@ class MartTrainer(trainer_base.BaseTrainer):
             n_word_total = 0
             n_word_correct = 0
             num_steps = 0
-            train_loss = 0.0
+            batch_loss = 0.0
 
             # ---------- Data　loader Iteration ----------
             for step, batch in enumerate(tqdm(train_loader)):
@@ -343,58 +347,33 @@ class MartTrainer(trainer_base.BaseTrainer):
                 # ---------- forward pass ----------
                 self.optimizer.zero_grad()
                 with autocast(enabled=self.cfg.fp16_train):
-                    if self.cfg.recurrent:
                         # ---------- training step for recurrent models ----------
-                        batched_data = [
-                            prepare_batch_inputs(
-                                step_data,
-                                use_cuda=self.cfg.use_cuda,
-                                non_blocking=self.cfg.cuda_non_blocking,
-                            )
-                            for step_data in batch[0]
-                        ]
-
-                        input_ids_list = [e["input_ids"] for e in batched_data]
-                        video_features_list = [e["video_feature"] for e in batched_data]
-                        input_masks_list = [e["input_mask"] for e in batched_data]
-                        token_type_ids_list = [
-                            e["token_type_ids"] for e in batched_data
-                        ]
-                        input_labels_list = [e["input_labels"] for e in batched_data]
-                        # clips_feature = [e["clips_feature"] for e in batched_data]
-                        future_clip = [e["future_clips"] for e in batched_data]
-
-                        if self.cfg.debug:
-                            cur_data = batched_data[step]
-                            self.logger.info(
-                                "input_ids \n{}".format(cur_data["input_ids"][step])
-                            )
-                            self.logger.info(
-                                "input_mask \n{}".format(cur_data["input_mask"][step])
-                            )
-                            self.logger.info(
-                                "input_labels \n{}".format(
-                                    cur_data["input_labels"][step]
-                                )
-                            )
-                            self.logger.info(
-                                "token_type_ids \n{}".format(
-                                    cur_data["token_type_ids"][step]
-                                )
-                            )
-                        # ver. future
-                        loss, pred_scores_list = self.model(
-                            input_ids_list,
-                            video_features_list,
-                            input_masks_list,
-                            token_type_ids_list,
-                            input_labels_list,
-                            future_clip,
+                    batched_data = [
+                        prepare_batch_inputs(
+                            step_data,
+                            use_cuda=self.cfg.use_cuda,
+                            non_blocking=self.cfg.cuda_non_blocking,
                         )
-                        self.train_steps += 1
-                        num_steps += 1
-                        train_loss += loss
-                        
+                        for step_data in batch[0]
+                    ]
+
+                    input_ids_list = [e["input_ids"] for e in batched_data]
+                    video_features_list = [e["video_feature"] for e in batched_data]
+                    input_labels_list = [e["input_labels_list"] for e in batched_data]
+                    if self.cfg.debug:
+                        cur_data = batched_data[step]
+                        self.logger.info(
+                            "input_ids \n{}".format(cur_data["input_ids"][step])
+                        )
+                    # ver. future
+                    loss, pred_scores_list = self.model(
+                        input_ids_list,
+                        video_features_list,
+                        input_labels_list
+                    )
+                    self.train_steps += 1
+                    num_steps += 1
+                    batch_loss += loss
 
                 self.hook_post_forward_step_timer()  # hook for step timing
 
@@ -429,12 +408,12 @@ class MartTrainer(trainer_base.BaseTrainer):
                 total_loss += loss.item()
                 n_correct = 0
                 n_word = 0
-                for pred, gold in zip(pred_scores_list, input_labels_list):
-                    n_correct += cal_performance(pred, gold)
-                    valid_label_mask = gold.ne(RecursiveCaptionDataset.IGNORE)
-                    n_word += valid_label_mask.sum().item()
-                n_word_total += n_word
-                n_word_correct += n_correct
+                # for pred, gold in zip(pred_scores_list, input_labels_list):
+                #     n_correct += cal_performance(pred, gold)
+                #     valid_label_mask = gold.ne(RecursiveCaptionDataset.IGNORE)
+                #     n_word += valid_label_mask.sum().item()
+                # n_word_total += n_word
+                # n_word_correct += n_correct
                 if grad_norm is not None:
                     self.metrics.update_meter(MMeters.GRAD, grad_norm)
 
@@ -455,12 +434,14 @@ class MartTrainer(trainer_base.BaseTrainer):
                 )
 
             # log train statistics
-            train_loss /= num_steps
-            loss_per_word = 1.0 * total_loss / n_word_total
-            accuracy = 1.0 * n_word_correct / n_word_total
-            self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
-            self.metrics.update_meter(MMeters.TRAIN_ACC, accuracy)
+            # loss_per_word = 1.0 * total_loss / n_word_total
+            # accuracy = 1.0 * n_word_correct / n_word_total
+            # self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
+            # self.metrics.update_meter(MMeters.TRAIN_ACC, accuracy)
             # return loss_per_word, accuracy
+            batch_loss /= num_steps
+            if self.wandb_flag == 1:
+                wandb.log({"train_loss": batch_loss})
 
             # ---------- validation ----------
             do_val = self.check_is_val_epoch()
@@ -468,14 +449,14 @@ class MartTrainer(trainer_base.BaseTrainer):
             is_best = False
             if do_val:
                 # run validation including with ground truth tokens and translation without any text
-                _val_loss, _val_score, is_best, _metrics, loss_delta = self.validate_epoch(
+                _val_loss, _val_score, is_best, _metrics = self.validate_epoch(
                     val_loader
                 )
                 # if is_best:
-            print("#############################################")
-            print("Do test")
-            self.test_epoch(test_loader)
-            print("###################################################")
+                print("#############################################")
+                print("Do test")
+                self.test_epoch(test_loader)
+                print("###################################################")
 
             # save the EMA weights
             ema_file = self.exp.get_models_file_ema(self.state.current_epoch)
@@ -493,23 +474,20 @@ class MartTrainer(trainer_base.BaseTrainer):
             )
         )
 
+
     @th.no_grad()
     def validate_epoch(
         self, data_loader: data.DataLoader
     ) -> (Tuple[float, float, bool, Dict[str, float]]):
         """
         Run both validation and translation.
-
         Validation: The same setting as training, where ground-truth word x_{t-1} is used to predict next word x_{t},
         not realistic for real inference.
-
         Translation: Use greedy generated words to predicted next words, the true inference situation.
         eval_mode can only be set to `val` here, as setting to `test` is cheating
         0. run inference, 1. Get METEOR, BLEU1-4, CIDEr scores, 2. Get vocab size, sentence length
-
         Args:
             data_loader: Dataloader for validation
-
         Returns:
             Tuple of:
                 validation loss
@@ -522,6 +500,8 @@ class MartTrainer(trainer_base.BaseTrainer):
         total_loss = 0
         n_word_total = 0
         n_word_correct = 0
+        batch_loss = 0.0
+        batch_idx = 0
 
         # setup ema
         if self.ema is not None:
@@ -540,8 +520,6 @@ class MartTrainer(trainer_base.BaseTrainer):
         pbar = tqdm(
             total=len(data_loader), desc=f"Validate epoch {self.state.current_epoch}"
         )
-        batch_loss = 0.0
-        batch_idx = 0
         for _step, batch in enumerate(data_loader):
             # ---------- forward pass ----------
             self.hook_pre_step_timer()  # hook for step timing
@@ -561,37 +539,23 @@ class MartTrainer(trainer_base.BaseTrainer):
                     # validate (ground truth as input for next token)
                     input_ids_list = [e["input_ids"] for e in batched_data]
                     video_features_list = [e["video_feature"] for e in batched_data]
-                    input_masks_list = [e["input_mask"] for e in batched_data]
-                    token_type_ids_list = [e["token_type_ids"] for e in batched_data]
                     input_labels_list = [e["input_labels"] for e in batched_data]
-                    future_clips = [e["future_clips"] for e in batched_data]
+
                     # ver. future
                     loss, pred_scores_list = self.model(
                         input_ids_list,
                         video_features_list,
-                        input_masks_list,
-                        token_type_ids_list,
                         input_labels_list,
-                        future_clips,
                     )
                     batch_loss += loss
                     batch_idx += 1
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
-                    # ver. origin
-                    # model_inputs = [
-                    #     [e["input_ids"] for e in batched_data],
-                    #     [e["video_feature"] for e in batched_data],
-                    #     [e["input_mask"] for e in batched_data],
-                    #     [e["token_type_ids"] for e in batched_data]]
 
                     model_inputs = [
                         [e["input_ids"] for e in batched_data],
-                        [e["video_feature"] for e in batched_data],
-                        [e["input_mask"] for e in batched_data],
-                        [e["token_type_ids"] for e in batched_data],
-                        [e["future_clips"] for e in batched_data],
+                        [e["video_feature"] for e in batched_data]
                     ]
                     dec_seq_list = self.translator.translate_batch(
                         model_inputs,
@@ -604,36 +568,37 @@ class MartTrainer(trainer_base.BaseTrainer):
                     for example_idx, (step_size, cur_meta) in enumerate(
                         zip(step_sizes, meta)
                     ):
+                        # print(cur_meta)
                         # example_idx indicates which example is in the batch
                         for step_idx, step_batch in enumerate(dec_seq_list[:step_size]):
                             # step_idx or we can also call it sen_idx
-                            batch_res["results"][cur_meta["name"]].append(
+                            batch_res["results"][cur_meta["clip_id"]].append(
                                 {
                                     "sentence": dataset.convert_ids_to_sentence(
                                         step_batch[example_idx].cpu().tolist()
                                     ),
                                     # remove encoding
                                     # .encode("ascii", "ignore"),
-                                    "timestamp": cur_meta["timestamp"][step_idx],
-                                    "gt_sentence": cur_meta["gt_sentence"][step_idx],
+                                    "gt_sentence": cur_meta["gt_sentence"],
+                                    "clip_id": cur_meta["clip_id"]
                                 }
                             )
-                    if self.cfg.debug:
-                        print(
-                            f"Vid feat {[v.mean().item() for v in video_features_list]}"
-                        )
+                    # if self.cfg.debug:
+                    #     print(
+                    #         f"Vid feat {[v.mean().item() for v in video_features_list]}"
+                    #     )
 
                 # keep logs
                 n_correct = 0
                 n_word = 0
-                for pred, gold in zip(pred_scores_list, input_labels_list):
-                    n_correct += cal_performance(pred, gold)
-                    valid_label_mask = gold.ne(RecursiveCaptionDataset.IGNORE)
-                    n_word += valid_label_mask.sum().item()
+                # for pred, gold in zip(pred_scores_list, input_labels_list):
+                #     n_correct += cal_performance(pred, gold)
+                #     valid_label_mask = gold.ne(RecursiveCaptionDataset.IGNORE)
+                #     n_word += valid_label_mask.sum().item()
 
                 # calculate metrix
-                n_word_total += n_word
-                n_word_correct += n_correct
+                # n_word_total += n_word
+                # n_word_correct += n_correct
                 total_loss += loss.item()
 
             # end of step
@@ -646,11 +611,14 @@ class MartTrainer(trainer_base.BaseTrainer):
 
             pbar.update()
         pbar.close()
-        self.val_steps += 1
-        batch_loss /= batch_idx
-        loss_delta = self.beforeloss - batch_loss
 
         # ---------- validation done ----------
+        batch_loss /= batch_idx
+        loss_delta = self.beforeloss - batch_loss
+        if self.wandb_flag == 1:
+            wandb.log({"val_loss_diff": loss_delta})
+            wandb.log({"val_loss": batch_loss})
+        self.beforeloss = batch_loss
 
         # sort translation
         batch_res["results"] = self.translator.sort_res(batch_res["results"])
@@ -715,33 +683,32 @@ class MartTrainer(trainer_base.BaseTrainer):
         )
 
         # calculate and output validation metrics
-        loss_per_word = 1.0 * total_loss / n_word_total
-        accuracy = 1.0 * n_word_correct / n_word_total
-        self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
-        self.metrics.update_meter(MMeters.TRAIN_ACC, accuracy)
+        # loss_per_word = 1.0 * total_loss / n_word_total
+        # accuracy = 1.0 * n_word_correct / n_word_total
+        # self.metrics.update_meter(MMeters.TRAIN_LOSS_PER_WORD, loss_per_word)
+        # self.metrics.update_meter(MMeters.TRAIN_ACC, accuracy)
         forward_time_total /= num_steps
-        self.logger.info(
-            f"Loss {loss_per_word:.5f} Acc {accuracy:.3%} total {timer() - self.timer_val_epoch:.3f}s, "
-            f"forward {forward_time_total:.3f}s"
-        )
+        # self.logger.info(
+        #     f"Loss {loss_per_word:.5f} Acc {accuracy:.3%} total {timer() - self.timer_val_epoch:.3f}s, "
+        #     f"forward {forward_time_total:.3f}s"
+        # )
 
         # find field which determines whether this is a new best epoch
-        # "Bleu_4", "METEOR", "ROUGE_L", "CIDEr"
+        if self.wandb_flag == 1:
+            wandb.log({"val_BLEU4": flat_metrics["Bleu_4"], "val_METEOR": flat_metrics["METEOR"], "val_ROUGE_L": flat_metrics["ROUGE_L"], "val_CIDEr": flat_metrics["CIDEr"]})
         if self.cfg.val.det_best_field == "cider":
-            # print(flat_metrics)
-            # val_score = flat_metrics["CIDEr"] + flat_metrics["ROUGE_L"]
             # val_score = flat_metrics["CIDEr"]
-            val_score = batch_loss
+            val_score = -1 * batch_loss
         else:
             raise NotImplementedError(
                 f"best field {self.cfg.val.det_best_field} not known"
             )
 
         # check for a new best epoch and update validation results
-        # is_best = self.check_is_new_best(val_score)
-        is_best = self.check_is_new_best(val_score, self.beforeloss)
-        self.hook_post_val_epoch(loss_per_word, is_best)
-        self.beforeloss = batch_loss
+        is_best = self.check_is_new_best(val_score)
+        if is_best == True:
+            self.best_epoch = self.state.current_epoch
+        self.hook_post_val_epoch(batch_loss, is_best)
 
         if self.is_test:
             # for test runs, save the validation results separately to a file
@@ -774,7 +741,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                     json.dump(metrics_data, metrics_file.open("wt", encoding="utf8"))
                     self.logger.info(f"Updated meteor in file {metrics_file}")
 
-        return total_loss, val_score, is_best, flat_metrics, loss_delta
+        return total_loss, val_score, is_best, flat_metrics
 
 
     @th.no_grad()
@@ -797,8 +764,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                 epoch is best
                 custom metrics with translation results dictionary
         """
-        # self.hook_pre_val_epoch()  # pre val epoch hook: set models to val and start timers
-        # forward_time_total = 0
+        self.hook_pre_val_epoch()  # pre val epoch hook: set models to val and start timers
+        forward_time_total = 0
         total_loss = 0
         n_word_total = 0
         n_word_correct = 0
@@ -818,16 +785,15 @@ class MartTrainer(trainer_base.BaseTrainer):
         # ---------- Dataloader Iteration ----------
         num_steps = 0
         pbar = tqdm(
-            total=len(data_loader), desc=f"Test epoch {self.state.current_epoch}"
+            total=len(data_loader), desc=f"Validate epoch {self.state.current_epoch}"
         )
-        test_loss = 0.0
-        num_batch = 0
+        batch_loss = 0.0
+        batch_idx = 0
         for _step, batch in enumerate(data_loader):
             # ---------- forward pass ----------
-            # self.hook_pre_step_timer()  # hook for step timing
+            self.hook_pre_step_timer()  # hook for step timing
 
             with autocast(enabled=self.cfg.fp16_val):
-
                 if self.cfg.recurrent:
                     # recurrent MART, TransformerXL, ...
                     # get data
@@ -842,22 +808,15 @@ class MartTrainer(trainer_base.BaseTrainer):
                     # validate (ground truth as input for next token)
                     input_ids_list = [e["input_ids"] for e in batched_data]
                     video_features_list = [e["video_feature"] for e in batched_data]
-                    input_masks_list = [e["input_mask"] for e in batched_data]
-                    token_type_ids_list = [e["token_type_ids"] for e in batched_data]
-                    input_labels_list = [e["input_labels"] for e in batched_data]
-                    future_clips = [e["future_clips"] for e in batched_data]
-
+                    input_labels_list = [e["input_labels_list"] for e in batched_data]
                     # ver. future
                     loss, pred_scores_list = self.model(
                         input_ids_list,
                         video_features_list,
-                        input_masks_list,
-                        token_type_ids_list,
-                        input_labels_list,
-                        future_clips
+                        input_labels_list
                     )
-                    test_loss += loss
-                    num_batch += 1
+                    batch_loss += loss
+                    batch_idx += 1
                     # translate (no ground truth text)
                     step_sizes = batch[1]  # list(int), len == bsz
                     meta = batch[2]  # list(dict), len == bsz
@@ -865,9 +824,6 @@ class MartTrainer(trainer_base.BaseTrainer):
                     model_inputs = [
                         [e["input_ids"] for e in batched_data],
                         [e["video_feature"] for e in batched_data],
-                        [e["input_mask"] for e in batched_data],
-                        [e["token_type_ids"] for e in batched_data],
-                        [e["future_clips"] for e in batched_data]
                     ]
                     dec_seq_list = self.translator.translate_batch(
                         model_inputs,
@@ -883,23 +839,23 @@ class MartTrainer(trainer_base.BaseTrainer):
                         # example_idx indicates which example is in the batch
                         for step_idx, step_batch in enumerate(dec_seq_list[:step_size]):
                             # step_idx or we can also call it sen_idx
-                            batch_res["results"][cur_meta["name"]].append(
+                            batch_res["results"][cur_meta["clip_id"]].append(
                                 {
                                     "sentence": dataset.convert_ids_to_sentence(
                                         step_batch[example_idx].cpu().tolist()
                                     ),
-                                    "gt_sentence": cur_meta["gt_sentence"][step_idx],
-                                    "timestamp": cur_meta["timestamp"][step_idx]
+                                    "gt_sentence": cur_meta["gt_sentence"],
+                                    "clip_id": cur_meta["clip_id"]
                                 }
                             )
 
                 # keep logs
                 n_correct = 0
                 n_word = 0
-                for pred, gold in zip(pred_scores_list, input_labels_list):
-                    n_correct += cal_performance(pred, gold)
-                    valid_label_mask = gold.ne(RecursiveCaptionDataset.IGNORE)
-                    n_word += valid_label_mask.sum().item()
+                # for pred, gold in zip(pred_scores_list, input_labels_list):
+                #     n_correct += cal_performance(pred, gold)
+                #     valid_label_mask = gold.ne(RecursiveCaptionDataset.IGNORE)
+                #     n_word += valid_label_mask.sum().item()
 
                 # calculate metrix
                 n_word_total += n_word
@@ -907,8 +863,8 @@ class MartTrainer(trainer_base.BaseTrainer):
                 total_loss += loss.item()
 
             # end of step
-            # self.hook_post_forward_step_timer()
-            # forward_time_total += self.timedelta_step_forward
+            self.hook_post_forward_step_timer()
+            forward_time_total += self.timedelta_step_forward
             num_steps += 1
 
             if self.cfg.debug:
@@ -916,9 +872,9 @@ class MartTrainer(trainer_base.BaseTrainer):
 
             pbar.update()
         pbar.close()
-        self.test_steps += 1
-        test_loss /= num_batch
-
+        batch_loss /= batch_idx
+        if self.wandb_flag == 1:
+            wandb.log({"test_loss": batch_loss})
 
         # ---------- validation done ----------
 
@@ -978,20 +934,21 @@ class MartTrainer(trainer_base.BaseTrainer):
         self.logger.info(
             f"Done with translation, epoch {self.state.current_epoch} split {eval_mode}"
         )
+        if self.wandb_flag == 1:
+            wandb.log({"test_BLEU4": flat_metrics["Bleu_4"], "test_METEOR": flat_metrics["METEOR"], "test_ROUGE_L": flat_metrics["ROUGE_L"], "test_CIDEr": flat_metrics["CIDEr"]})
         self.test_metrics = TRANSLATION_METRICS_LOG
+        self.higest_test = flat_metrics
         self.logger.info(
             ", ".join(
                 [f"{name} {flat_metrics[name]:.2%}" for name in TRANSLATION_METRICS_LOG]
             )
         )
-        self.higest_test = flat_metrics
 
 
     def get_opt_state(self) -> Dict[str, Dict[str, nn.Parameter]]:
         """
         Return the current optimizer and scheduler state.
         Note that the BertAdam optimizer used already includes scheduling.
-
         Returns:
             Dictionary of optimizer and scheduler state dict.
         """
@@ -1003,7 +960,6 @@ class MartTrainer(trainer_base.BaseTrainer):
     def set_opt_state(self, opt_state: Dict[str, Dict[str, nn.Parameter]]) -> None:
         """
         Set the current optimizer and scheduler state from the given state.
-
         Args:
             opt_state: Dictionary of optimizer and scheduler state dict.
         """
@@ -1013,7 +969,6 @@ class MartTrainer(trainer_base.BaseTrainer):
     def get_files_for_cleanup(self, epoch: int) -> List[Path]:
         """
         Implement this in the child trainer.
-
         Returns:
             List of files to cleanup.
         """
