@@ -25,12 +25,8 @@ from nntrainer.utils import MetricComparisonConst
 class BaseTrainer:
     """
     Base Trainer class. Inherited trainer instances must call hooks
-
     BaseTrainer takes care of Path setup, logging, device setup, checkpoints, metrics.
-
-
     determining device and moving models to cuda, setting up checkpoint loading and metrics.
-
     Args:
         cfg: Loaded configuration instance.
         model_mgr: Model manager.
@@ -215,7 +211,6 @@ class BaseTrainer:
     def train_model(self, train_loader: DataLoader, val_loader: DataLoader) -> None:
         """
         Training loop over epochs, including validation.
-
         Args:
             train_loader: Dataloader for training set.
             val_loader: Dataloader for validation set.
@@ -227,11 +222,9 @@ class BaseTrainer:
             Tuple[float, float, bool, Tuple[Dict[str, float], Any]]):
         """
         Validate a single epoch.
-
         Args:
             val_loader: Dataloader for validation set.
             **kwargs: Optional keyword arguments for validation.
-
         Returns:
             Tuple of validation loss, validation score, epoch is best flag and any custom metrics.
         """
@@ -242,7 +235,6 @@ class BaseTrainer:
     def get_opt_state(self) -> Dict[str, Dict[str, nn.Parameter]]:
         """
         Return the current optimizer and scheduler state.
-
         Returns:
             Dictionary of optimizer and scheduler state dict.
         """
@@ -254,7 +246,6 @@ class BaseTrainer:
     def set_opt_state(self, opt_state: Dict[str, Dict[str, nn.Parameter]]) -> None:
         """
         Set the current optimizer and scheduler state from the given state.
-
         Args:
             opt_state: Dictionary of optimizer and scheduler state dict.
         """
@@ -265,7 +256,6 @@ class BaseTrainer:
     def check_cuda(self):
         """
         Check the config if cuda is active.
-
         Returns:
             Flag whether cuda is active or not.
         """
@@ -273,10 +263,9 @@ class BaseTrainer:
             return True
         return False
 
-    def check_early_stop(self, loss_delta) -> bool:
+    def check_early_stop(self) -> bool:
         """
         Check if training should be stopped at this point.
-
         Returns:
             Whether or not training should be stopped.
         """
@@ -292,8 +281,7 @@ class BaseTrainer:
         # log infos
         self.logger.info(f"Experiment ---------- {self.exp.exp_group}/{self.exp.exp_name}/{self.exp.run_name} "
                          f"---------- epoch current/best/bad: {current_epoch}/{best_epoch}/{bad_epochs}")
-        # if bad_epochs >= self.cfg.val.det_best_terminate_after:
-        if loss_delta <= 10:
+        if bad_epochs >= self.cfg.val.det_best_terminate_after:
             # stop early
             self.logger.info(f"No improvement since {bad_epochs} epochs, end of training.")
             return True
@@ -303,7 +291,6 @@ class BaseTrainer:
     def check_is_val_epoch(self) -> bool:
         """
         Check if validation is needed at the end of training epochs.
-
         Returns:
             Whether or not validation is needed.
         """
@@ -314,24 +301,18 @@ class BaseTrainer:
         do_val = do_val or self.state.current_epoch == self.cfg.train.num_epochs
         return do_val
 
-    def check_is_new_best(self, result: float, before) -> bool:
+    def check_is_new_best(self, result: float) -> bool:
         """
         Check if the given result improves over the old best.
-
         Args:
             result: Validation result to compare with old best.
-
         Returns:
             Whether or not the result improves over the old best.
         """
         old_best = self.state.det_best_field_best
 
         # check if this is a new best
-        # is_best = self._check_if_current_score_is_best(result, old_best)
-        if result < before:
-            is_best = True
-        else:
-            is_best = False
+        is_best = self._check_if_current_score_is_best(result, old_best)
 
         # log info
         old_best_str = f"{old_best:.5f}" if old_best is not None else "NONE"
@@ -427,7 +408,6 @@ class BaseTrainer:
     def hook_post_val_epoch(self, val_loss: float, is_best: bool) -> None:
         """
         Hook called after validation epoch is done. Updates basic validation meters.
-
         Args:
             val_loss: Validation loss.
             is_best: Whether this is a new best epoch.
@@ -447,7 +427,6 @@ class BaseTrainer:
     def hook_post_train_and_val_epoch(self, is_val: bool, has_improved: bool) -> None:
         """
         Hook called after entire epoch (training + validation) is done.
-
         Args:
             is_val: Whether there was validation done this epoch.
             has_improved: If there was validation, whether there was an improvement (new best).
@@ -512,17 +491,14 @@ class BaseTrainer:
             disable_grad_clip: bool = False) -> bool:
         """
         Hook called after one optimization step.
-
         Profile gpu and update step-based meters. Feed everything to tensorboard.
         Needs some information to be passed down from the trainer for proper logging.
-
         Args:
             epoch_step: Current step in the epoch.
             loss: Training loss.
             lr: Training learning rate.
             additional_log: Additional string to print in the train step log.
             disable_grad_clip: Disable gradient clipping if it's done already somewhere else
-
         Returns:
             Whether log output should be printed in this step or not.
         """
@@ -617,11 +593,9 @@ class BaseTrainer:
         """
         Compare given current and best and return True if the current is better than best + some threshold.
         Depending on config, smaller or bigger values are better and threshold is absolute or relative.
-
         Args:
             current: Current score.
             best: Best score so far.
-
         Returns:
             Whether current is better than best by some threshold.
         """
@@ -737,10 +711,8 @@ class BaseTrainer:
     def get_files_for_cleanup(self, _epoch: int) -> List[Path]:
         """
         Implement this in the child trainer.
-
         Args:
             _epoch: Epoch to cleanup
-
         Returns:
             List of files to cleanup.
         """

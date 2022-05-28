@@ -65,7 +65,7 @@ def evaluate_stats_files(
     final_res = {"submission": submission_stat}
 
     if "gt_sentence" in submission_data_entries[0]:
-        gt_sentences = [e["gt_sentence"] for e in submission_data_entries]
+        gt_sentences = [e["gt_sentence"][0] for e in submission_data_entries]
         gt_stat = get_sen_stat(gt_sentences)  # only one reference is used here!!!
         final_res["gt_stat"] = gt_stat
 

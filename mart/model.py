@@ -85,17 +85,18 @@ class RegressionNet(torch.nn.Module):
 
         self.conv1 = torch.nn.Conv2d(3, 16, 8, 2)
         self.conv2 = torch.nn.Conv2d(16, 64, 8, 2)
-        self.conv3 = torch.nn.Conv2d(64, 128, 4, 2)
-        self.conv4 = torch.nn.Conv2d(128, 256, 4, 2)
-        self.conv5 = torch.nn.Conv2d(512, 1024, 5, 1)
+        self.conv3 = torch.nn.Conv2d(64, 256, 8, 2)
+        self.conv4 = torch.nn.Conv2d(256, 512, 8, 2)
+        self.conv5 = torch.nn.Conv2d(512, 1024, 8, 1)
 
 
-    def forward(self, x): # input: (batch_size, 3, 224, 224)
+    def forward(self, x): 
+        x = x.permute(0, 3, 1, 2) # input: (batch_size, 3, 224, 224)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.conv4(x))
-        x = self.conv5(x)
+        x = self.conv5(x).reshape(-1, 1024)
         return x
 
 
@@ -108,26 +109,30 @@ class EncoderRNN(nn.Module):
         
     def forward(self, features):
         """Decode image feature vectors and generates captions."""
-        features = features.unsqueeze(1)
         packed = pad_sequence(features, batch_first=True) 
         hiddens, _ = self.lstm(packed)
-        return hiddens[0]
+        return hiddens[:, -1, :] # last hidden state of each sequence
 
 
 class DecoderRNN(nn.Module):
     def __init__(self, cfg):
         """Set the hyper-parameters and build the layers."""
         super(DecoderRNN, self).__init__()
+        self.cfg = cfg
         self.lstm = nn.LSTM(cfg.hidden_size, cfg.hidden_size, cfg.dec_num_layers, batch_first=True)
         self.max_seg_length = cfg.max_seq_length
         self.linear = nn.Linear(cfg.hidden_size, cfg.vocab_size)
         
     def forward(self, features):
         """Decode image feature vectors and generates captions."""
-        features = features.unsqueeze(1)
-        packed = pad_sequence(features, batch_first=True) 
-        hiddens, _ = self.lstm(packed)
-        outputs = self.linear(hiddens[0])
+        features = features.unsqueeze(1).permute(1, 0, 2) # (batch_size, 1, hidden_size)
+        rnn_input = torch.zeros(features.shape[1], self.max_seg_length, self.cfg.hidden_size).to(features.device) # (batch_size, max_seq_length, hidden_size)
+        # rnn_input[:, 0, :] = features.squeeze(1) # (batch_size, hidden_size)
+        c_0 = torch.zeros(features.shape).to(features.device) # (batch_size, hidden_size)
+        packed = pad_sequence(rnn_input, batch_first=True) 
+        # print(c_0.shape)
+        hiddens, _ = self.lstm(packed, (features, c_0))
+        outputs = self.linear(hiddens)
         return outputs
 
 
@@ -150,18 +155,18 @@ class RecursiveTransformer(nn.Module):
         """
         hidden_features = []
         for i in range(self.cfg.num_img):
-            hidden_features.append(self.cnn_enc(video_features[i]))
-        hidden_features = torch.stack(hidden_features, dim=1)
+            hidden_features.append(self.cnn_enc(video_features[:, i, :, :, :].squeeze()))
+        hidden_features = torch.stack(hidden_features).permute(1, 0, 2)
         hidden_features = self.rnn_enc(hidden_features)
         hidden_features = self.rnn_dec(hidden_features)
+        # print(hidden_features.shape)
         return hidden_features
 
     # ver. future
     def forward(
         self,
         input_ids_list,
-        video_features_list,
-        input_labels_list,
+        video_features_list
     ):
         """
         Args:
@@ -179,18 +184,17 @@ class RecursiveTransformer(nn.Module):
         # [(N, M, D)] * num_hidden_layers, initialized internally
         step_size = len(input_ids_list)
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-        for idx in range(step_size):
-            hidden_features = self.forward_step(
-                video_features_list[idx]
-            )
-            prediction_scores_list.append(hidden_features)
+        hidden_features = self.forward_step(
+            video_features_list[0]
+        )
+        prediction_scores_list.append(hidden_features)
         # compute loss, get predicted words
         caption_loss = 0.0
-        for idx in range(step_size):
-            snt_loss = self.loss_func(
-                prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
-                input_labels_list[idx].view(-1),
-            )
-            caption_loss += snt_loss
+        # for idx in range(step_size):
+        snt_loss = self.loss_func(
+            prediction_scores_list[0].permute(0, 2, 1),
+            input_ids_list[0],
+        )
+        caption_loss += snt_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list

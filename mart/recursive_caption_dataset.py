@@ -351,15 +351,15 @@ class RecursiveCaptionDataset(data.Dataset):
             raw_words = [self.idx2word[wid] for wid in ids if wid != self.IGNORE]
 
         # get only sentences, the tokens between `[BOS]` and the first `[EOS]`
-        if return_sentence_only:
-            words = []
-            for w in raw_words[1:]:  # no [BOS]
-                if w != self.EOS_TOKEN:
-                    words.append(w)
-                else:
-                    break
-        else:
-            words = raw_words
+        # if return_sentence_only:
+        words = []
+        for w in raw_words[1:]:  # no [BOS]
+            if w != self.EOS_TOKEN:
+                words.append(w)
+            else:
+                break
+        # else:
+        #     words = raw_words
         return " ".join(words)
 
     def collate_fn(self, batch):
