@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.nn.utils import weight_norm
 from torch.utils.tensorboard.summary import video
 import torchvision.models as models
 
@@ -78,16 +79,18 @@ def create_mart_model(
     return model
 
 
-class RegressionNet(torch.nn.Module):
+class FeatureExtractor(torch.nn.Module):
 
     def __init__(self):
-        super(RegressionNet, self).__init__()
+        super(FeatureExtractor, self).__init__()
 
-        self.conv1 = torch.nn.Conv2d(3, 16, 8, 2)
-        self.conv2 = torch.nn.Conv2d(16, 64, 8, 2)
-        self.conv3 = torch.nn.Conv2d(64, 256, 8, 2)
-        self.conv4 = torch.nn.Conv2d(256, 512, 8, 2)
-        self.conv5 = torch.nn.Conv2d(512, 1024, 8, 1)
+        self.conv1 = torch.nn.Conv3d(3, 256, (1, 8, 8), stride=(1, 2, 2))
+        self.conv2 = torch.nn.Conv3d(256, 512, (1, 8, 8), stride=(1, 2, 2))
+        self.conv3 = torch.nn.Conv3d(512, 1024, (1, 8, 8), stride=(1, 2, 2))
+        self.conv4 = torch.nn.Conv3d(1024, 768, (1, 8, 8), stride=(1, 2, 2))
+        self.conv5 = torch.nn.Conv3d(768, 512, (1, 8, 8), stride=(1, 1, 1))
+        self.conv6 = torch.nn.Conv3d(512, 512, (1, 8, 8), stride=(1, 1, 1))
+        self.conv7 = torch.nn.Conv3d(512, 512, (1, 8, 8), stride=(1, 1, 1))
 
 
     def forward(self, x): 
@@ -96,43 +99,139 @@ class RegressionNet(torch.nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.conv4(x))
-        x = self.conv5(x).reshape(-1, 1024)
+        x = F.relu(self.conv5(x))
+        x = F.relu(self.conv6(x))
+        x = self.conv7(x).reshape(-1, 5, 512)
         return x
 
+class TemporalConvNet(nn.Module):
+    def __init__(self, config):
+        super(TemporalConvNet, self).__init__()
+        self.conv1 = nn.Conv1d(512, 768, 2)
+        self.conv2 = nn.Conv1d(768, 1024, 2)
+        self.conv3 = nn.Conv1d(1024, 768, 2)
+        self.conv4 = nn.Conv1d(768, 512, 2)
+        self.conv5 = nn.Conv1d(512, 512, 2)
+
+    def forward(self, x):
+        x = x.permute(0, 2, 1) # input: (batch_size, seq_len, num_features)
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.conv4(x))
+        x = self.conv5(x).permute(0, 2, 1) # output: (batch_size, num_features, seq_len)
+        return x
+
+class FeaturePredictor(torch.nn.Module):
+    def __init__(self, config):
+        super(FeaturePredictor, self).__init__()
+        self.cfg = config
+        self.tcn = TemporalConvNet(config)
+
+    def forward(self, x):
+        hidden = self.tcn(x)
+        x = x + hidden
+        return x, hidden
 
 
-class EncoderRNN(nn.Module):
+class AttentionLayer(nn.Module):
+  def __init__(self, conv_channels, embed_dim):
+    super(AttentionLayer, self).__init__()
+    self.in_projection = nn.Linear(conv_channels, embed_dim)
+    self.out_projection = nn.Linear(embed_dim, conv_channels)
+    self.bmm = torch.bmm
+
+  def forward(self, x, wordemb, imgsfeats):
+    residual = x
+    x = (self.in_projection(x) + wordemb) * math.sqrt(0.5)
+    b, c, f_h, f_w = imgsfeats.size()
+    y = imgsfeats.view(b, c, f_h*f_w)
+    x = self.bmm(x, y)
+    sz = x.size()
+    x = F.softmax(x.view(sz[0] * sz[1], sz[2]))
+    x = x.view(sz)
+    attn_scores = x
+    y = y.permute(0, 2, 1)
+    x = self.bmm(x, y)
+    s = y.size(1)
+    x = x * (s * math.sqrt(1.0 / s))
+    x = (self.out_projection(x) + residual) * math.sqrt(0.5)
+    return x, attn_scores
+
+class convcap(nn.Module):
+  def __init__(self, config, num_layers=4, is_attention=True, nfeats=300, dropout=.1):
+    super(convcap, self).__init__()
+    self.cfg = config
+    num_wordclass = self.cfg.vocab_size
+    self.nimgfeats = 512
+    self.is_attention = is_attention
+    self.nfeats = nfeats
+    self.dropout = dropout 
+    self.emb_0 = nn.Linear(num_wordclass, nfeats)
+    self.dropout_0 = nn.Dropout(0.1)
+    self.emb_1 = nn.Linear(nfeats, nfeats)
+    self.imgproj = nn.Linear(self.nimgfeats, self.nfeats)
+    self.resproj = nn.Linear(nfeats*2, self.nfeats)
+    n_in = 2 * self.nfeats 
+    n_out = self.nfeats
+    self.n_layers = num_layers
+    self.convs = nn.ModuleList()
+    self.attention = nn.ModuleList()
+    self.kernel_size = 5
+    self.pad = self.kernel_size - 1
+    for i in range(self.n_layers):
+        self.convs.append(nn.Conv1d(n_in, 2*n_out, self.kernel_size, self.pad, dropout))
+        if(self.is_attention):
+            self.attention.append(AttentionLayer(n_out, nfeats))
+        n_in = n_out
+    self.classifier_0 = nn.Linear(self.nfeats, (nfeats // 2))
+    self.classifier_1 = nn.Linear((nfeats // 2), num_wordclass, dropout=dropout)
+
+  def forward(self, imgsfeats, wordclass):
+    attn_buffer = None
+    wordemb = self.dropout_0(F.relu(self.emb_0(wordclass)))
+    wordemb = self.emb_1(wordemb)
+    x = wordemb.transpose(2, 1)
+    batchsize, wordembdim, maxtokens = x.size() # (16, 300, 25)
+    y = F.relu(self.imgproj(imgsfeats))
+    y = y.unsqueeze(2).expand(batchsize, self.nfeats, maxtokens)
+    x = torch.cat([x, y], 1)
+    for i, conv in enumerate(self.convs):
+        if(i == 0):
+            x = x.transpose(2, 1)
+            residual = self.resproj(x)
+            residual = residual.transpose(2, 1)
+            x = x.transpose(2, 1)
+        else:
+            residual = x
+    x = F.dropout(x, 0.1, training=self.training)
+    x = conv(x)
+    x = x[:,:,:-self.pad]
+    x = F.glu(x, dim=1)
+    if(self.is_attention):
+        attn = self.attention[i]
+        x = x.transpose(2, 1)
+        x, attn_buffer = attn(x, wordemb, imgsfeats)
+        x = x.transpose(2, 1)
+    x = (x+residual)*math.sqrt(.5)
+    x = x.transpose(2, 1)
+    x = self.classifier_0(x)
+    x = F.dropout(x, 0.1, training=self.training)
+    x = self.classifier_1(x)
+    x = x.transpose(2, 1)
+    return x, attn_buffer
+
+class CaptioningModule(nn.Module):
     def __init__(self, cfg):
         """Set the hyper-parameters and build the layers."""
-        super(EncoderRNN, self).__init__()
-        self.lstm = nn.LSTM(cfg.hidden_size, cfg.hidden_size, cfg.enc_num_layers, batch_first=True)
-        
-    def forward(self, features):
-        """Decode image feature vectors and generates captions."""
-        packed = pad_sequence(features, batch_first=True) 
-        hiddens, (h_e, c_e) = self.lstm(packed)
-        return hiddens[:, -1, : ], h_e[-1, :, : ], c_e[-1, :, : ] # last hidden state of each sequence
-
-
-class DecoderRNN(nn.Module):
-    def __init__(self, cfg):
-        """Set the hyper-parameters and build the layers."""
-        super(DecoderRNN, self).__init__()
+        super(CaptioningModule, self).__init__()
         self.cfg = cfg
-        self.lstm = nn.LSTM(cfg.hidden_size, cfg.hidden_size, cfg.dec_num_layers, batch_first=True)
-        self.max_seg_length = cfg.max_seq_length
-        self.linear = nn.Linear(cfg.hidden_size, cfg.vocab_size)
-        
-    def forward(self, features, h_e, c_e):
-        """Decode image feature vectors and generates captions."""
-        features = features.unsqueeze(1).permute(1, 0, 2) # (batch_size, 1, hidden_size)
-        rnn_input = torch.zeros(features.shape[1], self.max_seg_length, self.cfg.hidden_size).to(features.device) # (batch_size, max_seq_length, hidden_size)
-        # rnn_input[:, 0, :] = features.squeeze(1) # (batch_size, hidden_size)
-        c_0 = torch.zeros(features.shape).to(features.device) # (batch_size, hidden_size)
-        packed = pad_sequence(rnn_input, batch_first=True) 
-        # print(c_0.shape)
-        hiddens, _= self.lstm(packed, (h_e.unsqueeze(0), c_e.unsqueeze(0)))
-        outputs = self.linear(hiddens)
+        self.conv = convcap(cfg.num_wordclass, num_layers=cfg.num_layers, is_attention=cfg.is_attention, nfeats=cfg.nfeats, dropout=cfg.dropout)
+
+    def forward(self, imgsfeats, imgsfc7):
+        """Run forward propagation."""
+        wordclass = torch.zeros(imgsfeats.size(0), self.cfg.max_seq_length, self.cfg.num_wordclass)
+        outputs, attn = self.conv(imgsfeats, imgsfc7, wordclass)
         return outputs
 
 
@@ -142,9 +241,9 @@ class RecursiveTransformer(nn.Module):
     def __init__(self, cfg: MartConfig):
         super().__init__()
         self.cfg = cfg
-        self.cnn_enc = RegressionNet()
-        self.rnn_enc = EncoderRNN(cfg)
-        self.rnn_dec = DecoderRNN(cfg)
+        self.embedding = FeatureExtractor()
+        self.enc_comv = FeaturePredictor(self.cfg)
+        self.dec_conv = CaptioningModule(self.cfg)
         self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
 
     def forward_step(
@@ -153,14 +252,11 @@ class RecursiveTransformer(nn.Module):
         """
         single step forward in the recursive structure
         """
-        hidden_features = []
-        for i in range(self.cfg.num_img):
-            hidden_features.append(self.cnn_enc(video_features[:, i, :, :, :].squeeze()))
-        hidden_features = torch.stack(hidden_features).permute(1, 0, 2)
-        hidden_features, h_e, c_e = self.rnn_enc(hidden_features)
-        hidden_features = self.rnn_dec(hidden_features, h_e, c_e)
+        video_features = self.embedding(video_features)
+        hidden_features = self.enc_comv(video_features)
+        outputs = self.dec_conv(hidden_features)
         # print(hidden_features.shape)
-        return hidden_features
+        return outputs, hidden_features
 
     # ver. future
     def forward(

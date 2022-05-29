@@ -56,6 +56,8 @@ enc_num_layers: 2
 dec_num_layers: 1
 vocab_size: 130
 hidden_size: 1024
+img_feat_size: 512
+word_feat_size: 300
 max_seq_length: 25
 num_img: 5
 # ---------- Optimization ----------
