@@ -110,8 +110,8 @@ class EncoderRNN(nn.Module):
     def forward(self, features):
         """Decode image feature vectors and generates captions."""
         packed = pad_sequence(features, batch_first=True) 
-        hiddens, _ = self.lstm(packed)
-        return hiddens[:, -1, :] # last hidden state of each sequence
+        hiddens, (h_e, c_e) = self.lstm(packed)
+        return hiddens[:, -1, : ], h_e[-1, :, : ], c_e[-1, :, : ] # last hidden state of each sequence
 
 
 class DecoderRNN(nn.Module):
@@ -123,7 +123,7 @@ class DecoderRNN(nn.Module):
         self.max_seg_length = cfg.max_seq_length
         self.linear = nn.Linear(cfg.hidden_size, cfg.vocab_size)
         
-    def forward(self, features):
+    def forward(self, features, h_e, c_e):
         """Decode image feature vectors and generates captions."""
         features = features.unsqueeze(1).permute(1, 0, 2) # (batch_size, 1, hidden_size)
         rnn_input = torch.zeros(features.shape[1], self.max_seg_length, self.cfg.hidden_size).to(features.device) # (batch_size, max_seq_length, hidden_size)
@@ -131,7 +131,7 @@ class DecoderRNN(nn.Module):
         c_0 = torch.zeros(features.shape).to(features.device) # (batch_size, hidden_size)
         packed = pad_sequence(rnn_input, batch_first=True) 
         # print(c_0.shape)
-        hiddens, _ = self.lstm(packed, (features, c_0))
+        hiddens, _= self.lstm(packed, (h_e.unsqueeze(0), c_e.unsqueeze(0)))
         outputs = self.linear(hiddens)
         return outputs
 
@@ -157,8 +157,8 @@ class RecursiveTransformer(nn.Module):
         for i in range(self.cfg.num_img):
             hidden_features.append(self.cnn_enc(video_features[:, i, :, :, :].squeeze()))
         hidden_features = torch.stack(hidden_features).permute(1, 0, 2)
-        hidden_features = self.rnn_enc(hidden_features)
-        hidden_features = self.rnn_dec(hidden_features)
+        hidden_features, h_e, c_e = self.rnn_enc(hidden_features)
+        hidden_features = self.rnn_dec(hidden_features, h_e, c_e)
         # print(hidden_features.shape)
         return hidden_features
 
