@@ -1,6 +1,5 @@
 """
 Text generation, greedy or beam search.
-
 References:
     Copyright (c) 2017 Jie Lei
     Licensed under The MIT License, see https://choosealicense.com/licenses/mit/
@@ -10,7 +9,6 @@ References:
         booktitle={ACL},
         year={2020}
     }
-
     History:
     https://github.com/jayleicn/recurrent-transformer
     Current version 2021 https://github.com/gingsi/coot-videotext
@@ -55,7 +53,7 @@ def tile(x, count, dim=0):
 
 
 def mask_tokens_after_eos(
-    input_ids, input_masks, eos_token_id=RCDataset.EOS, pad_token_id=RCDataset.PAD
+    input_ids, eos_token_id=RCDataset.EOS, pad_token_id=RCDataset.PAD
 ):
     """
     replace values after `[EOS]` with `[PAD]`,
@@ -68,8 +66,8 @@ def mask_tokens_after_eos(
         if len(cur_eos_idxs) != 0:
             cur_eos_idx = cur_eos_idxs[0, 0].item()
             input_ids[row_idx, cur_eos_idx + 1 :] = pad_token_id
-            input_masks[row_idx, cur_eos_idx + 1 :] = 0
-    return input_ids, input_masks
+            # input_masks[row_idx, cur_eos_idx + 1 :] = 0
+    return input_ids
 
 
 class Translator(object):
@@ -293,14 +291,12 @@ class Translator(object):
         self,
         input_ids_list,
         video_features_list,
-        input_labels_list,
-        rt_model,
+        rt_model
     ):
         def greedy_decoding_step(
             prev_ms_,
             input_ids,
             video_features,
-            input_labels,
             model,
             max_v_len,
             max_t_len,
@@ -309,7 +305,6 @@ class Translator(object):
         ):
             """
             RTransformer The first few args are the same to the input to the forward_step func
-
             Notes:
                 1, Copy the prev_ms each word generation step, as the func will modify this value,
                 which will cause discrepancy between training and inference
@@ -318,17 +313,18 @@ class Translator(object):
                 next memory state tensor.
             """
             bsz = len(input_ids)
+            # tmp_idx = torch.zeros(input_ids.shape).long()
+            # input_ids = tmp_idx.cuda()
             next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
-            for dec_idx in range(max_v_len, max_v_len + max_t_len):
+            for dec_idx in range(1, max_t_len):
                 # 生成した語で埋める
                 input_ids[:, dec_idx] = next_symbols
-                input_masks[:, dec_idx] = 1
+                # input_masks[:, dec_idx] = 1
                 copied_prev_ms = copy.deepcopy(
                     prev_ms_
                 )  # since the func is changing data inside
                 pred_scores = model.forward_step(
-                    input_ids,
-                    video_features,
+                    input_ids, video_features
                 )
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10
@@ -338,7 +334,7 @@ class Translator(object):
                 next_symbols = next_words
 
             # compute memory, mimic the way memory is generated at training time
-            input_ids, input_masks = mask_tokens_after_eos(input_ids, input_masks)
+            input_ids = mask_tokens_after_eos(input_ids)
             return (
                 copied_prev_ms,
                 input_ids[:, max_v_len:],
@@ -347,14 +343,14 @@ class Translator(object):
         # input_ids_list, input_masks_list = self.prepare_video_only_inputs(
         #     input_ids_list, input_masks_list, token_type_ids_list
         # )
-        for cur_input_masks in input_ids_list:
-            assert (
-                torch.sum(cur_input_masks[:, self.cfg.max_v_len + 1 :]) == 0
-            ), "Initially, all text tokens should be masked"
+        # for cur_input_masks in input_ids_list:
+        #     assert (
+        #         torch.sum(cur_input_masks[:, self.cfg.max_v_len + 1 :]) == 0
+        #     ), "Initially, all text tokens should be masked"
 
         config = rt_model.cfg
         with torch.no_grad():
-            prev_ms = [None] * config.num_hidden_layers
+            prev_ms = [None] * config.enc_num_layers
             step_size = len(input_ids_list)
             dec_seq_list = []
             for idx in range(step_size):
@@ -362,12 +358,11 @@ class Translator(object):
                     prev_ms,
                     input_ids_list[idx],
                     video_features_list[idx],
-                    input_labels_list[idx],
                     rt_model,
                     config.max_v_len,
                     config.max_t_len,
                 )
-                dec_seq_list.append(dec_seq)
+            dec_seq_list.append(dec_seq)
             return dec_seq_list
 
     def translate_batch_single_sentence_greedy(
@@ -382,7 +377,6 @@ class Translator(object):
     ):
         """
         The first few args are the same to the input to the forward_step func
-
         Notes:
             1, Copy the prev_ms each word generation step, as the func will modify this value,
             which will cause discrepancy between training and inference
@@ -430,7 +424,6 @@ class Translator(object):
     ):
         """
         The first few args are the same to the input to the forward_step func
-
         Notes:
             1, Copy the prev_ms each word generation step, as the func will modify this value,
             which will cause discrepancy between training and inference
@@ -549,6 +542,6 @@ class Translator(object):
         """
         final_res_dict = {}
         for k, v in list(res_dict.items()):
-            final_res_dict[k] = sorted(v, key=lambda x: float(x["timestamp"][0]))
+            final_res_dict[k] = sorted(v, key=lambda x: float(x["clip_id"][0]))
             # final_res_dict[k] = sorted(v, key=lambda x: float(x["timestamp"]))
         return final_res_dict

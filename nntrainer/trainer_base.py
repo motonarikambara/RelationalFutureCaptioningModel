@@ -314,24 +314,18 @@ class BaseTrainer:
         do_val = do_val or self.state.current_epoch == self.cfg.train.num_epochs
         return do_val
 
-    def check_is_new_best(self, result: float, before) -> bool:
+    def check_is_new_best(self, result: float) -> bool:
         """
         Check if the given result improves over the old best.
-
         Args:
             result: Validation result to compare with old best.
-
         Returns:
             Whether or not the result improves over the old best.
         """
         old_best = self.state.det_best_field_best
 
         # check if this is a new best
-        # is_best = self._check_if_current_score_is_best(result, old_best)
-        if result < before:
-            is_best = True
-        else:
-            is_best = False
+        is_best = self._check_if_current_score_is_best(result, old_best)
 
         # log info
         old_best_str = f"{old_best:.5f}" if old_best is not None else "NONE"

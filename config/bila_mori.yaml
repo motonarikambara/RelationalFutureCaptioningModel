@@ -36,7 +36,7 @@ dataset_val:
     shuffle: false
     split: "val"
 max_t_len: 25
-max_v_len: 5
+max_v_len: 1
 max_n_sen: 5
 # ---------- Technical ----------
 random_seed: null
@@ -53,7 +53,7 @@ fp16_val: false
 use_glove: true
 freeze_glove: false
 enc_num_layers: 2
-dec_num_layers: 1
+dec_num_layers: 2
 vocab_size: 130
 hidden_size: 1024
 max_seq_length: 25

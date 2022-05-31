@@ -83,14 +83,15 @@ class RegressionNet(torch.nn.Module):
     def __init__(self):
         super(RegressionNet, self).__init__()
 
-        self.conv1 = torch.nn.Conv2d(3, 16, 8, 2)
-        self.conv2 = torch.nn.Conv2d(16, 64, 8, 2)
-        self.conv3 = torch.nn.Conv2d(64, 128, 4, 2)
-        self.conv4 = torch.nn.Conv2d(128, 256, 4, 2)
-        self.conv5 = torch.nn.Conv2d(512, 1024, 5, 1)
+        self.conv1 = torch.nn.Conv2d(3, 64, 8, 2)
+        self.conv2 = torch.nn.Conv2d(64, 128, 8, 2)
+        self.conv3 = torch.nn.Conv2d(128, 256, 8, 2)
+        self.conv4 = torch.nn.Conv2d(256, 512, 8, 2)
+        self.conv5 = torch.nn.Conv2d(512, 1024, 8, 1)
 
 
     def forward(self, x): # input: (batch_size, 3, 224, 224)
+        x = x.permute(0, 3, 1, 2) # (batch_size, 3, 224, 224)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
@@ -109,9 +110,9 @@ class EncoderRNN(nn.Module):
     def forward(self, features):
         """Decode image feature vectors and generates captions."""
         features = features.unsqueeze(1)
-        packed = pad_sequence(features, batch_first=True) 
-        hiddens, _ = self.lstm(packed)
-        return hiddens[0]
+        packed = pad_sequence(features, batch_first=True).squeeze()
+        _, (h_n, c_n) = self.lstm(packed)
+        return (h_n, c_n)
 
 
 class DecoderRNN(nn.Module):
@@ -122,12 +123,14 @@ class DecoderRNN(nn.Module):
         self.max_seg_length = cfg.max_seq_length
         self.linear = nn.Linear(cfg.hidden_size, cfg.vocab_size)
         
-    def forward(self, features):
+    def forward(self, features, h_0, c_0):
         """Decode image feature vectors and generates captions."""
         features = features.unsqueeze(1)
-        packed = pad_sequence(features, batch_first=True) 
-        hiddens, _ = self.lstm(packed)
-        outputs = self.linear(hiddens[0])
+        # h_0 = h_0.unsqueeze(0)
+        # c_0 = c_0.unsqueeze(0)
+        packed = pad_sequence(features, batch_first=True).squeeze()
+        hiddens, _ = self.lstm(packed, (h_0, c_0))
+        outputs = self.linear(hiddens)
         return outputs
 
 
@@ -141,27 +144,29 @@ class RecursiveTransformer(nn.Module):
         self.rnn_enc = EncoderRNN(cfg)
         self.rnn_dec = DecoderRNN(cfg)
         self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        self.emb = nn.Embedding(cfg.vocab_size, cfg.hidden_size)
 
     def forward_step(
-        self, video_features
+        self, input_ids, video_features
     ):
         """
         single step forward in the recursive structure
         """
         hidden_features = []
         for i in range(self.cfg.num_img):
-            hidden_features.append(self.cnn_enc(video_features[i]))
+            hidden_features.append(self.cnn_enc(video_features[:, i, :, :, :]))
         hidden_features = torch.stack(hidden_features, dim=1)
-        hidden_features = self.rnn_enc(hidden_features)
-        hidden_features = self.rnn_dec(hidden_features)
-        return hidden_features
+        (h_n, c_n) = self.rnn_enc(hidden_features)
+        words = self.emb(input_ids)
+        outputs = self.rnn_dec(words, h_n, c_n)
+        print(outputs.shape)
+        return outputs
 
     # ver. future
     def forward(
         self,
         input_ids_list,
-        video_features_list,
-        input_labels_list,
+        video_features_list
     ):
         """
         Args:
@@ -181,15 +186,15 @@ class RecursiveTransformer(nn.Module):
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         for idx in range(step_size):
             hidden_features = self.forward_step(
-                video_features_list[idx]
+                input_ids_list[idx], video_features_list[idx]
             )
             prediction_scores_list.append(hidden_features)
         # compute loss, get predicted words
         caption_loss = 0.0
         for idx in range(step_size):
             snt_loss = self.loss_func(
-                prediction_scores_list[idx].view(-1, self.cfg.vocab_size),
-                input_labels_list[idx].view(-1),
+                prediction_scores_list[idx].permute(0, 2, 1),
+                input_ids_list[idx],
             )
             caption_loss += snt_loss
         caption_loss /= step_size
