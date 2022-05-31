@@ -317,7 +317,7 @@ class Translator(object):
             """
             bsz = len(input_ids)
             tmp_idx = torch.zeros(input_ids.shape).long()
-            input_ids = tmp_idx
+            input_ids = tmp_idx.cuda()
             next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
             for dec_idx in range(max_t_len):
                 # 生成した語で埋める
