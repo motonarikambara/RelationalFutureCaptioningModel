@@ -316,6 +316,8 @@ class Translator(object):
                 next memory state tensor.
             """
             bsz = len(input_ids)
+            tmp_idx = torch.zeros(input_ids.shape)
+            input_ids = tmp_idx
             next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
             for dec_idx in range(max_t_len):
                 # 生成した語で埋める
@@ -325,7 +327,7 @@ class Translator(object):
                     prev_ms_
                 )  # since the func is changing data inside
                 pred_scores, _, _ = model.forward_step(
-                    video_features
+                    video_features, input_ids
                 )
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10

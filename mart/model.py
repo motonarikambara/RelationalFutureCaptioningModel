@@ -248,10 +248,9 @@ class CaptioningModule(nn.Module):
         self.cfg = cfg
         self.conv = convcap(cfg)
 
-    def forward(self, imgsfeats):
+    def forward(self, imgsfeats, wordclass):
         """Run forward propagation."""
         # print(imgsfeats[0].size())
-        wordclass = torch.zeros((imgsfeats.size(0), self.cfg.max_seq_length, self.cfg.word_feat_size), requires_grad=True).cuda()
         outputs, attn = self.conv(imgsfeats, wordclass)
         return outputs
 
@@ -267,21 +266,23 @@ class RecursiveTransformer(nn.Module):
         self.dec_conv = CaptioningModule(self.cfg)
         self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
         self.l1 = nn.L1Loss()
+        self.emb = nn.Embedding(self.cfg.vocab_size, self.cfg.word_feat_size)
 
     def forward_step(
-        self, video_features, gt = None
+        self, video_features, input_ids
     ):
         """
         single step forward in the recursive structure
         """
         video_features = self.embedding(video_features)
         hidden_features = self.enc_comv(video_features)
-        outputs = self.dec_conv(hidden_features)
-        if gt is not None:
-            gt = self.embedding(gt)
-            return outputs, video_features, gt
+        word_emb = self.emb(input_ids)
+        outputs = self.dec_conv(hidden_features, word_emb)
+        # if gt is not None:
+        #     gt = self.embedding(gt)
+        #     return outputs, video_features, gt
         # print(hidden_features.shape)
-        return outputs, video_features, gt
+        return outputs, video_features, word_emb
 
     # ver. future
     def forward(
@@ -308,7 +309,7 @@ class RecursiveTransformer(nn.Module):
         predict_feats = []
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
         outputs, hidden_features, gt = self.forward_step(
-            video_features_list[0], gt_clip[0]
+            video_features_list[0], input_ids_list[0]
         )
         prediction_scores_list.append(outputs)
         predict_feats.append(hidden_features)
@@ -320,8 +321,8 @@ class RecursiveTransformer(nn.Module):
             input_ids_list[0],
         )
         l1 = 0.0
-        if gt is not None:
-            l1 = self.l1(hidden_features, gt)
-        caption_loss += snt_loss + l1
+        # if gt is not None:
+        #     l1 = self.l1(hidden_features, gt)
+        caption_loss += snt_loss
         caption_loss /= step_size
         return caption_loss, prediction_scores_list
