@@ -1,6 +1,5 @@
 """
 Text generation, greedy or beam search.
-
 References:
     Copyright (c) 2017 Jie Lei
     Licensed under The MIT License, see https://choosealicense.com/licenses/mit/
@@ -10,7 +9,6 @@ References:
         booktitle={ACL},
         year={2020}
     }
-
     History:
     https://github.com/jayleicn/recurrent-transformer
     Current version 2021 https://github.com/gingsi/coot-videotext
@@ -307,7 +305,6 @@ class Translator(object):
         ):
             """
             RTransformer The first few args are the same to the input to the forward_step func
-
             Notes:
                 1, Copy the prev_ms each word generation step, as the func will modify this value,
                 which will cause discrepancy between training and inference
@@ -316,8 +313,10 @@ class Translator(object):
                 next memory state tensor.
             """
             bsz = len(input_ids)
+            # tmp_idx = torch.zeros(input_ids.shape).long()
+            # input_ids = tmp_idx.cuda()
             next_symbols = torch.LongTensor([start_idx] * bsz)  # (N, )
-            for dec_idx in range(max_t_len):
+            for dec_idx in range(1, max_t_len):
                 # 生成した語で埋める
                 input_ids[:, dec_idx] = next_symbols
                 # input_masks[:, dec_idx] = 1
@@ -325,7 +324,7 @@ class Translator(object):
                     prev_ms_
                 )  # since the func is changing data inside
                 pred_scores = model.forward_step(
-                    video_features
+                    input_ids, video_features
                 )
                 # suppress unk token; (N, L, vocab_size)
                 pred_scores[:, :, unk_idx] = -1e10
@@ -378,7 +377,6 @@ class Translator(object):
     ):
         """
         The first few args are the same to the input to the forward_step func
-
         Notes:
             1, Copy the prev_ms each word generation step, as the func will modify this value,
             which will cause discrepancy between training and inference
@@ -426,7 +424,6 @@ class Translator(object):
     ):
         """
         The first few args are the same to the input to the forward_step func
-
         Notes:
             1, Copy the prev_ms each word generation step, as the func will modify this value,
             which will cause discrepancy between training and inference

@@ -83,15 +83,15 @@ class RegressionNet(torch.nn.Module):
     def __init__(self):
         super(RegressionNet, self).__init__()
 
-        self.conv1 = torch.nn.Conv2d(3, 16, 8, 2)
-        self.conv2 = torch.nn.Conv2d(16, 64, 8, 2)
-        self.conv3 = torch.nn.Conv2d(64, 256, 8, 2)
+        self.conv1 = torch.nn.Conv2d(3, 64, 8, 2)
+        self.conv2 = torch.nn.Conv2d(64, 128, 8, 2)
+        self.conv3 = torch.nn.Conv2d(128, 256, 8, 2)
         self.conv4 = torch.nn.Conv2d(256, 512, 8, 2)
         self.conv5 = torch.nn.Conv2d(512, 1024, 8, 1)
 
 
-    def forward(self, x): 
-        x = x.permute(0, 3, 1, 2) # input: (batch_size, 3, 224, 224)
+    def forward(self, x): # input: (batch_size, 3, 224, 224)
+        x = x.permute(0, 3, 1, 2) # (batch_size, 3, 224, 224)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
@@ -109,9 +109,10 @@ class EncoderRNN(nn.Module):
         
     def forward(self, features):
         """Decode image feature vectors and generates captions."""
-        packed = pad_sequence(features, batch_first=True) 
-        hiddens, (h_e, c_e) = self.lstm(packed)
-        return hiddens[:, -1, : ], h_e[-1, :, : ], c_e[-1, :, : ] # last hidden state of each sequence
+        features = features.unsqueeze(1)
+        packed = pad_sequence(features, batch_first=True).squeeze()
+        _, (h_n, c_n) = self.lstm(packed)
+        return (h_n, c_n)
 
 
 class DecoderRNN(nn.Module):
@@ -123,15 +124,13 @@ class DecoderRNN(nn.Module):
         self.max_seg_length = cfg.max_seq_length
         self.linear = nn.Linear(cfg.hidden_size, cfg.vocab_size)
         
-    def forward(self, features, h_e, c_e):
+    def forward(self, features, h_0, c_0):
         """Decode image feature vectors and generates captions."""
-        features = features.unsqueeze(1).permute(1, 0, 2) # (batch_size, 1, hidden_size)
-        rnn_input = torch.zeros(features.shape[1], self.max_seg_length, self.cfg.hidden_size).to(features.device) # (batch_size, max_seq_length, hidden_size)
-        # rnn_input[:, 0, :] = features.squeeze(1) # (batch_size, hidden_size)
-        c_0 = torch.zeros(features.shape).to(features.device) # (batch_size, hidden_size)
-        packed = pad_sequence(rnn_input, batch_first=True) 
-        # print(c_0.shape)
-        hiddens, _= self.lstm(packed, (h_e.unsqueeze(0), c_e.unsqueeze(0)))
+        features = features.unsqueeze(1)
+        # h_0 = h_0.unsqueeze(0)
+        # c_0 = c_0.unsqueeze(0)
+        packed = pad_sequence(features, batch_first=True).squeeze()
+        hiddens, _ = self.lstm(packed, (h_0, c_0))
         outputs = self.linear(hiddens)
         return outputs
 
@@ -146,21 +145,23 @@ class RecursiveTransformer(nn.Module):
         self.rnn_enc = EncoderRNN(cfg)
         self.rnn_dec = DecoderRNN(cfg)
         self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        self.emb = nn.Embedding(cfg.vocab_size, cfg.hidden_size)
 
     def forward_step(
-        self, video_features
+        self, input_ids, video_features
     ):
         """
         single step forward in the recursive structure
         """
         hidden_features = []
         for i in range(self.cfg.num_img):
-            hidden_features.append(self.cnn_enc(video_features[:, i, :, :, :].squeeze()))
-        hidden_features = torch.stack(hidden_features).permute(1, 0, 2)
-        hidden_features, h_e, c_e = self.rnn_enc(hidden_features)
-        hidden_features = self.rnn_dec(hidden_features, h_e, c_e)
-        # print(hidden_features.shape)
-        return hidden_features
+            hidden_features.append(self.cnn_enc(video_features[:, i, :, :, :]))
+        hidden_features = torch.stack(hidden_features)
+        (h_n, c_n) = self.rnn_enc(hidden_features)
+        words = self.emb(input_ids)
+        outputs = self.rnn_dec(words, h_n, c_n)
+        print(outputs.shape)
+        return outputs  
 
     # ver. future
     def forward(
