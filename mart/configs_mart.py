@@ -131,6 +131,8 @@ class MartConfig(trainer_configs.BaseExperimentConfig):
         self.hidden_size: int = config.pop("hidden_size")
         self.enc_num_layers: int = config.pop("enc_num_layers")
         self.dec_num_layers: int = config.pop("dec_num_layers")
+        self.img_feat_size: int = config.pop("img_feat_size")
+        self.word_feat_size: int = config.pop("word_feat_size")
         self.vocab_size: int = config.pop("vocab_size")
         self.max_seq_length: int = config.pop("max_seq_length")
         self.use_glove: bool = config.pop("use_glove")

@@ -324,7 +324,7 @@ class Translator(object):
                 copied_prev_ms = copy.deepcopy(
                     prev_ms_
                 )  # since the func is changing data inside
-                pred_scores, _ = model.forward_step(
+                pred_scores, _, _ = model.forward_step(
                     video_features
                 )
                 # suppress unk token; (N, L, vocab_size)

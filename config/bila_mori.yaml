@@ -3,7 +3,7 @@ config_type: "mart"
 use_beam: false
 # ---------- Training ----------
 train:
-    batch_size: 16
+    batch_size: 4
     num_epochs: 25
     loss_func: "crossentropy"
     clip_gradient: 1
@@ -36,7 +36,7 @@ dataset_val:
     shuffle: false
     split: "val"
 max_t_len: 25
-max_v_len: 5
+max_v_len: 0
 max_n_sen: 5
 # ---------- Technical ----------
 random_seed: null

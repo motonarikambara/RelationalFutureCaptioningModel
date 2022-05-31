@@ -84,17 +84,24 @@ class FeatureExtractor(torch.nn.Module):
     def __init__(self):
         super(FeatureExtractor, self).__init__()
 
+        # self.conv1 = torch.nn.Conv3d(3, 256, (1, 8, 8), stride=(1, 2, 2))
+        # self.conv2 = torch.nn.Conv3d(256, 512, (1, 8, 8), stride=(1, 2, 2))
+        # self.conv3 = torch.nn.Conv3d(512, 1024, (1, 8, 8), stride=(1, 2, 2))
+        # self.conv4 = torch.nn.Conv3d(1024, 768, (1, 8, 8), stride=(1, 2, 2))
+        # self.conv5 = torch.nn.Conv3d(768, 512, (1, 8, 8), stride=(1, 1, 1))
+        # self.conv6 = torch.nn.Conv3d(512, 512, (1, 1, 1), stride=(1, 1, 1))
+        # self.conv7 = torch.nn.Conv3d(512, 512, (1, 1, 1), stride=(1, 1, 1))
         self.conv1 = torch.nn.Conv3d(3, 256, (1, 8, 8), stride=(1, 2, 2))
         self.conv2 = torch.nn.Conv3d(256, 512, (1, 8, 8), stride=(1, 2, 2))
-        self.conv3 = torch.nn.Conv3d(512, 1024, (1, 8, 8), stride=(1, 2, 2))
+        self.conv3 = torch.nn.Conv3d(512, 1024, (1, 8, 8), stride=(1, 1, 1))
         self.conv4 = torch.nn.Conv3d(1024, 768, (1, 8, 8), stride=(1, 2, 2))
-        self.conv5 = torch.nn.Conv3d(768, 512, (1, 8, 8), stride=(1, 1, 1))
-        self.conv6 = torch.nn.Conv3d(512, 512, (1, 8, 8), stride=(1, 1, 1))
-        self.conv7 = torch.nn.Conv3d(512, 512, (1, 8, 8), stride=(1, 1, 1))
+        self.conv5 = torch.nn.Conv3d(768, 512, (1, 7, 7), stride=(1, 1, 1))
+        self.conv6 = torch.nn.Conv3d(512, 512, (1, 1, 1), stride=(1, 1, 1))
+        self.conv7 = torch.nn.Conv3d(512, 512, (1, 1, 1), stride=(1, 1, 1))
 
 
-    def forward(self, x): 
-        x = x.permute(0, 3, 1, 2) # input: (batch_size, 3, 224, 224)
+    def forward(self, x): # input: (batch_size, 5, 224, 224, 3)
+        x = x.permute(0, 4, 1, 2, 3)  # (batch_size, 3, 5, 224, 224)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
@@ -107,19 +114,30 @@ class FeatureExtractor(torch.nn.Module):
 class TemporalConvNet(nn.Module):
     def __init__(self, config):
         super(TemporalConvNet, self).__init__()
-        self.conv1 = nn.Conv1d(512, 768, 2)
-        self.conv2 = nn.Conv1d(768, 1024, 2)
-        self.conv3 = nn.Conv1d(1024, 768, 2)
-        self.conv4 = nn.Conv1d(768, 512, 2)
-        self.conv5 = nn.Conv1d(512, 512, 2)
+        # self.conv1 = nn.Conv1d(512, 768, 1)
+        # self.conv2 = nn.Conv1d(768, 1024, 1)
+        # self.conv3 = nn.Conv1d(1024, 768, 1)
+        # self.conv4 = nn.Conv1d(768, 512, 1)
+        # self.conv5 = nn.Conv1d(512, 512, 1)
+        self.conv1 = nn.Conv1d(512, 1024, 1)
+        self.conv2 = nn.Conv1d(1024, 512, 1)
+        # self.conv3 = nn.Conv1d(1024, 768, 1)
+        # self.conv4 = nn.Conv1d(768, 512, 1)
+        # self.conv5 = nn.Conv1d(512, 512, 1)
 
     def forward(self, x):
         x = x.permute(0, 2, 1) # input: (batch_size, seq_len, num_features)
+        # x = F.relu(self.conv1(x))
+        # x = F.relu(self.conv2(x))
+        # x = F.relu(self.conv3(x))
+        # x = F.relu(self.conv4(x))
+        # x = self.conv5(x)
         x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-        x = self.conv5(x).permute(0, 2, 1) # output: (batch_size, num_features, seq_len)
+        x = self.conv2(x)
+        # x = F.relu(self.conv3(x))
+        # x = F.relu(self.conv4(x))
+        # x = self.conv5(x)
+        x = x.permute(0, 2, 1) # output: (batch_size, num_features, seq_len)
         return x
 
 class FeaturePredictor(torch.nn.Module):
@@ -131,7 +149,7 @@ class FeaturePredictor(torch.nn.Module):
     def forward(self, x):
         hidden = self.tcn(x)
         x = x + hidden
-        return x, hidden
+        return x
 
 
 class AttentionLayer(nn.Module):
@@ -145,7 +163,7 @@ class AttentionLayer(nn.Module):
         residual = x
         x = (self.in_projection(x) + wordemb) * math.sqrt(0.5)
         b, c, f_h, f_w = imgsfeats.size()
-        y = imgsfeats.view(b, c, f_h*f_w)
+        y = imgsfeats.view(b, c, f_h*f_w).permute(0, 2, 1)
         x = self.bmm(x, y)
         sz = x.size()
         x = F.softmax(x.view(sz[0] * sz[1], sz[2]))
@@ -159,7 +177,7 @@ class AttentionLayer(nn.Module):
         return x, attn_scores
 
 class convcap(nn.Module):
-    def __init__(self, config, num_layers=4, is_attention=True, nfeats=300, dropout=.1):
+    def __init__(self, config, num_layers=3, is_attention=True, nfeats=300, dropout=0.1):
         super(convcap, self).__init__()
         self.cfg = config
         num_wordclass = self.cfg.vocab_size
@@ -167,7 +185,7 @@ class convcap(nn.Module):
         self.is_attention = is_attention
         self.nfeats = nfeats
         self.dropout = dropout 
-        self.emb_0 = nn.Linear(num_wordclass, nfeats)
+        self.emb_0 = nn.Linear(nfeats, nfeats)
         self.dropout_0 = nn.Dropout(0.1)
         self.emb_1 = nn.Linear(nfeats, nfeats)
         self.imgproj = nn.Linear(self.nimgfeats, self.nfeats)
@@ -180,12 +198,12 @@ class convcap(nn.Module):
         self.kernel_size = 5
         self.pad = self.kernel_size - 1
         for i in range(self.n_layers):
-            self.convs.append(nn.Conv1d(n_in, 2*n_out, self.kernel_size, self.pad, dropout))
+            self.convs.append(nn.Conv1d(n_in, 2*n_out, self.kernel_size, padding=int(self.pad)))
             if(self.is_attention):
                 self.attention.append(AttentionLayer(n_out, nfeats))
             n_in = n_out
         self.classifier_0 = nn.Linear(self.nfeats, (nfeats // 2))
-        self.classifier_1 = nn.Linear((nfeats // 2), num_wordclass, dropout=dropout)
+        self.classifier_1 = nn.Linear((nfeats // 2), num_wordclass)
 
     def forward(self, imgsfeats, wordclass):
         attn_buffer = None
@@ -194,7 +212,9 @@ class convcap(nn.Module):
         x = wordemb.transpose(2, 1)
         batchsize, wordembdim, maxtokens = x.size() # (16, 300, 25)
         y = F.relu(self.imgproj(imgsfeats))
-        y = y.unsqueeze(2).expand(batchsize, self.nfeats, maxtokens)
+        # y = y.unsqueeze(2).expand(batchsize, self.nfeats, maxtokens)
+        imgsfeats = y.unsqueeze(2)
+        y = y.squeeze().permute(0, 2, 1).repeat(1, 1, 5)
         x = torch.cat([x, y], 1)
         for i, conv in enumerate(self.convs):
             if(i == 0):
@@ -204,16 +224,16 @@ class convcap(nn.Module):
                 x = x.transpose(2, 1)
             else:
                 residual = x
-        x = F.dropout(x, 0.1, training=self.training)
-        x = conv(x)
-        x = x[:,:,:-self.pad]
-        x = F.glu(x, dim=1)
-        if(self.is_attention):
-            attn = self.attention[i]
-            x = x.transpose(2, 1)
-            x, attn_buffer = attn(x, wordemb, imgsfeats)
-            x = x.transpose(2, 1)
-        x = (x+residual)*math.sqrt(.5)
+            x = F.dropout(x, 0.1, training=self.training)
+            x = conv(x)
+            x = x[:,:,:-self.pad]
+            x = F.glu(x, dim=1)
+            if(self.is_attention):
+                attn = self.attention[i]
+                x = x.transpose(2, 1)
+                x, attn_buffer = attn(x, wordemb, imgsfeats)
+                x = x.transpose(2, 1)
+            x = (x+residual)*math.sqrt(.5)
         x = x.transpose(2, 1)
         x = self.classifier_0(x)
         x = F.dropout(x, 0.1, training=self.training)
@@ -226,11 +246,12 @@ class CaptioningModule(nn.Module):
         """Set the hyper-parameters and build the layers."""
         super(CaptioningModule, self).__init__()
         self.cfg = cfg
-        self.conv = convcap(cfg.num_wordclass, num_layers=cfg.num_layers, is_attention=cfg.is_attention, nfeats=cfg.nfeats, dropout=cfg.dropout)
+        self.conv = convcap(cfg)
 
     def forward(self, imgsfeats):
         """Run forward propagation."""
-        wordclass = torch.zeros(imgsfeats.size(0), self.cfg.max_seq_length, self.cfg.num_wordclass)
+        # print(imgsfeats[0].size())
+        wordclass = torch.zeros((imgsfeats.size(0), self.cfg.max_seq_length, self.cfg.word_feat_size), requires_grad=True).cuda()
         outputs, attn = self.conv(imgsfeats, wordclass)
         return outputs
 
@@ -295,7 +316,7 @@ class RecursiveTransformer(nn.Module):
         caption_loss = 0.0
         # for idx in range(step_size):
         snt_loss = self.loss_func(
-            prediction_scores_list[0].permute(0, 2, 1),
+            prediction_scores_list[0],
             input_ids_list[0],
         )
         l1 = 0.0

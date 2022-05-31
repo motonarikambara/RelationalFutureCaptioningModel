@@ -221,7 +221,8 @@ class RecursiveCaptionDataset(data.Dataset):
             img_path = os.path.join(file_n, file_name)
 
             image = cv2.imread(img_path)
-            emb_feat = cv2.resize(image, (224, 224))
+            # emb_feat = cv2.resize(image, (224, 224))
+            emb_feat = cv2.resize(image, (128, 128))
             feats.append(emb_feat)
         feats = np.array(feats)
 
@@ -232,7 +233,8 @@ class RecursiveCaptionDataset(data.Dataset):
             img_path = os.path.join(gt_file_n, file_name)
 
             image = cv2.imread(img_path)
-            emb_feat = cv2.resize(image, (224, 224))
+            # emb_feat = cv2.resize(image, (224, 224))
+            emb_feat = cv2.resize(image, (128, 128))
             gtfeats.append(emb_feat)
         gtfeats = np.array(gtfeats)       
         return feats, gtfeats
