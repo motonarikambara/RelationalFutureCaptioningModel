@@ -359,6 +359,7 @@ class MartTrainer(trainer_base.BaseTrainer):
 
                     input_ids_list = [e["input_ids"] for e in batched_data]
                     video_features_list = [e["video_feature"] for e in batched_data]
+                    gtfeats = [e["gt"] for e in batched_data]
                     if self.cfg.debug:
                         cur_data = batched_data[step]
                         self.logger.info(
@@ -368,6 +369,7 @@ class MartTrainer(trainer_base.BaseTrainer):
                     loss, pred_scores_list = self.model(
                         input_ids_list,
                         video_features_list,
+                        gtfeats
                     )
                     self.train_steps += 1
                     num_steps += 1
@@ -537,12 +539,14 @@ class MartTrainer(trainer_base.BaseTrainer):
                     # validate (ground truth as input for next token)
                     input_ids_list = [e["input_ids"] for e in batched_data]
                     video_features_list = [e["video_feature"] for e in batched_data]
+                    gtfeats = [e["gt"] for e in batched_data]
                     # input_labels_list = [e["input_labels"] for e in batched_data]
 
                     # ver. future
                     loss, pred_scores_list = self.model(
                         input_ids_list,
                         video_features_list,
+                        gtfeats
                     )
                     batch_loss += loss
                     batch_idx += 1
@@ -805,11 +809,13 @@ class MartTrainer(trainer_base.BaseTrainer):
                     # validate (ground truth as input for next token)
                     input_ids_list = [e["input_ids"] for e in batched_data]
                     video_features_list = [e["video_feature"] for e in batched_data]
+                    gtfeats = [e["gt"] for e in batched_data]
                     # input_labels_list = [e["input_labels_list"] for e in batched_data]
                     # ver. future
                     loss, pred_scores_list = self.model(
                         input_ids_list,
                         video_features_list,
+                        gtfeats
                     )
                     batch_loss += loss
                     batch_idx += 1

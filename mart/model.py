@@ -135,91 +135,91 @@ class FeaturePredictor(torch.nn.Module):
 
 
 class AttentionLayer(nn.Module):
-  def __init__(self, conv_channels, embed_dim):
-    super(AttentionLayer, self).__init__()
-    self.in_projection = nn.Linear(conv_channels, embed_dim)
-    self.out_projection = nn.Linear(embed_dim, conv_channels)
-    self.bmm = torch.bmm
+    def __init__(self, conv_channels, embed_dim):
+        super(AttentionLayer, self).__init__()
+        self.in_projection = nn.Linear(conv_channels, embed_dim)
+        self.out_projection = nn.Linear(embed_dim, conv_channels)
+        self.bmm = torch.bmm
 
-  def forward(self, x, wordemb, imgsfeats):
-    residual = x
-    x = (self.in_projection(x) + wordemb) * math.sqrt(0.5)
-    b, c, f_h, f_w = imgsfeats.size()
-    y = imgsfeats.view(b, c, f_h*f_w)
-    x = self.bmm(x, y)
-    sz = x.size()
-    x = F.softmax(x.view(sz[0] * sz[1], sz[2]))
-    x = x.view(sz)
-    attn_scores = x
-    y = y.permute(0, 2, 1)
-    x = self.bmm(x, y)
-    s = y.size(1)
-    x = x * (s * math.sqrt(1.0 / s))
-    x = (self.out_projection(x) + residual) * math.sqrt(0.5)
-    return x, attn_scores
+    def forward(self, x, wordemb, imgsfeats):
+        residual = x
+        x = (self.in_projection(x) + wordemb) * math.sqrt(0.5)
+        b, c, f_h, f_w = imgsfeats.size()
+        y = imgsfeats.view(b, c, f_h*f_w)
+        x = self.bmm(x, y)
+        sz = x.size()
+        x = F.softmax(x.view(sz[0] * sz[1], sz[2]))
+        x = x.view(sz)
+        attn_scores = x
+        y = y.permute(0, 2, 1)
+        x = self.bmm(x, y)
+        s = y.size(1)
+        x = x * (s * math.sqrt(1.0 / s))
+        x = (self.out_projection(x) + residual) * math.sqrt(0.5)
+        return x, attn_scores
 
 class convcap(nn.Module):
-  def __init__(self, config, num_layers=4, is_attention=True, nfeats=300, dropout=.1):
-    super(convcap, self).__init__()
-    self.cfg = config
-    num_wordclass = self.cfg.vocab_size
-    self.nimgfeats = 512
-    self.is_attention = is_attention
-    self.nfeats = nfeats
-    self.dropout = dropout 
-    self.emb_0 = nn.Linear(num_wordclass, nfeats)
-    self.dropout_0 = nn.Dropout(0.1)
-    self.emb_1 = nn.Linear(nfeats, nfeats)
-    self.imgproj = nn.Linear(self.nimgfeats, self.nfeats)
-    self.resproj = nn.Linear(nfeats*2, self.nfeats)
-    n_in = 2 * self.nfeats 
-    n_out = self.nfeats
-    self.n_layers = num_layers
-    self.convs = nn.ModuleList()
-    self.attention = nn.ModuleList()
-    self.kernel_size = 5
-    self.pad = self.kernel_size - 1
-    for i in range(self.n_layers):
-        self.convs.append(nn.Conv1d(n_in, 2*n_out, self.kernel_size, self.pad, dropout))
-        if(self.is_attention):
-            self.attention.append(AttentionLayer(n_out, nfeats))
-        n_in = n_out
-    self.classifier_0 = nn.Linear(self.nfeats, (nfeats // 2))
-    self.classifier_1 = nn.Linear((nfeats // 2), num_wordclass, dropout=dropout)
+    def __init__(self, config, num_layers=4, is_attention=True, nfeats=300, dropout=.1):
+        super(convcap, self).__init__()
+        self.cfg = config
+        num_wordclass = self.cfg.vocab_size
+        self.nimgfeats = 512
+        self.is_attention = is_attention
+        self.nfeats = nfeats
+        self.dropout = dropout 
+        self.emb_0 = nn.Linear(num_wordclass, nfeats)
+        self.dropout_0 = nn.Dropout(0.1)
+        self.emb_1 = nn.Linear(nfeats, nfeats)
+        self.imgproj = nn.Linear(self.nimgfeats, self.nfeats)
+        self.resproj = nn.Linear(nfeats*2, self.nfeats)
+        n_in = 2 * self.nfeats 
+        n_out = self.nfeats
+        self.n_layers = num_layers
+        self.convs = nn.ModuleList()
+        self.attention = nn.ModuleList()
+        self.kernel_size = 5
+        self.pad = self.kernel_size - 1
+        for i in range(self.n_layers):
+            self.convs.append(nn.Conv1d(n_in, 2*n_out, self.kernel_size, self.pad, dropout))
+            if(self.is_attention):
+                self.attention.append(AttentionLayer(n_out, nfeats))
+            n_in = n_out
+        self.classifier_0 = nn.Linear(self.nfeats, (nfeats // 2))
+        self.classifier_1 = nn.Linear((nfeats // 2), num_wordclass, dropout=dropout)
 
-  def forward(self, imgsfeats, wordclass):
-    attn_buffer = None
-    wordemb = self.dropout_0(F.relu(self.emb_0(wordclass)))
-    wordemb = self.emb_1(wordemb)
-    x = wordemb.transpose(2, 1)
-    batchsize, wordembdim, maxtokens = x.size() # (16, 300, 25)
-    y = F.relu(self.imgproj(imgsfeats))
-    y = y.unsqueeze(2).expand(batchsize, self.nfeats, maxtokens)
-    x = torch.cat([x, y], 1)
-    for i, conv in enumerate(self.convs):
-        if(i == 0):
+    def forward(self, imgsfeats, wordclass):
+        attn_buffer = None
+        wordemb = self.dropout_0(F.relu(self.emb_0(wordclass)))
+        wordemb = self.emb_1(wordemb)
+        x = wordemb.transpose(2, 1)
+        batchsize, wordembdim, maxtokens = x.size() # (16, 300, 25)
+        y = F.relu(self.imgproj(imgsfeats))
+        y = y.unsqueeze(2).expand(batchsize, self.nfeats, maxtokens)
+        x = torch.cat([x, y], 1)
+        for i, conv in enumerate(self.convs):
+            if(i == 0):
+                x = x.transpose(2, 1)
+                residual = self.resproj(x)
+                residual = residual.transpose(2, 1)
+                x = x.transpose(2, 1)
+            else:
+                residual = x
+        x = F.dropout(x, 0.1, training=self.training)
+        x = conv(x)
+        x = x[:,:,:-self.pad]
+        x = F.glu(x, dim=1)
+        if(self.is_attention):
+            attn = self.attention[i]
             x = x.transpose(2, 1)
-            residual = self.resproj(x)
-            residual = residual.transpose(2, 1)
+            x, attn_buffer = attn(x, wordemb, imgsfeats)
             x = x.transpose(2, 1)
-        else:
-            residual = x
-    x = F.dropout(x, 0.1, training=self.training)
-    x = conv(x)
-    x = x[:,:,:-self.pad]
-    x = F.glu(x, dim=1)
-    if(self.is_attention):
-        attn = self.attention[i]
+        x = (x+residual)*math.sqrt(.5)
         x = x.transpose(2, 1)
-        x, attn_buffer = attn(x, wordemb, imgsfeats)
+        x = self.classifier_0(x)
+        x = F.dropout(x, 0.1, training=self.training)
+        x = self.classifier_1(x)
         x = x.transpose(2, 1)
-    x = (x+residual)*math.sqrt(.5)
-    x = x.transpose(2, 1)
-    x = self.classifier_0(x)
-    x = F.dropout(x, 0.1, training=self.training)
-    x = self.classifier_1(x)
-    x = x.transpose(2, 1)
-    return x, attn_buffer
+        return x, attn_buffer
 
 class CaptioningModule(nn.Module):
     def __init__(self, cfg):
@@ -228,10 +228,10 @@ class CaptioningModule(nn.Module):
         self.cfg = cfg
         self.conv = convcap(cfg.num_wordclass, num_layers=cfg.num_layers, is_attention=cfg.is_attention, nfeats=cfg.nfeats, dropout=cfg.dropout)
 
-    def forward(self, imgsfeats, imgsfc7):
+    def forward(self, imgsfeats):
         """Run forward propagation."""
         wordclass = torch.zeros(imgsfeats.size(0), self.cfg.max_seq_length, self.cfg.num_wordclass)
-        outputs, attn = self.conv(imgsfeats, imgsfc7, wordclass)
+        outputs, attn = self.conv(imgsfeats, wordclass)
         return outputs
 
 
@@ -245,9 +245,10 @@ class RecursiveTransformer(nn.Module):
         self.enc_comv = FeaturePredictor(self.cfg)
         self.dec_conv = CaptioningModule(self.cfg)
         self.loss_func = nn.CrossEntropyLoss(ignore_index=-1)
+        self.l1 = nn.L1Loss()
 
     def forward_step(
-        self, video_features
+        self, video_features, gt = None
     ):
         """
         single step forward in the recursive structure
@@ -255,14 +256,18 @@ class RecursiveTransformer(nn.Module):
         video_features = self.embedding(video_features)
         hidden_features = self.enc_comv(video_features)
         outputs = self.dec_conv(hidden_features)
+        if gt is not None:
+            gt = self.embedding(gt)
+            return outputs, video_features, gt
         # print(hidden_features.shape)
-        return outputs, hidden_features
+        return outputs, video_features, gt
 
     # ver. future
     def forward(
         self,
         input_ids_list,
-        video_features_list
+        video_features_list,
+        gt_clip = None
     ):
         """
         Args:
@@ -279,11 +284,13 @@ class RecursiveTransformer(nn.Module):
         """
         # [(N, M, D)] * num_hidden_layers, initialized internally
         step_size = len(input_ids_list)
+        predict_feats = []
         prediction_scores_list = []  # [(N, L, vocab_size)] * step_size
-        hidden_features = self.forward_step(
-            video_features_list[0]
+        outputs, hidden_features, gt = self.forward_step(
+            video_features_list[0], gt_clip[0]
         )
-        prediction_scores_list.append(hidden_features)
+        prediction_scores_list.append(outputs)
+        predict_feats.append(hidden_features)
         # compute loss, get predicted words
         caption_loss = 0.0
         # for idx in range(step_size):
@@ -291,6 +298,9 @@ class RecursiveTransformer(nn.Module):
             prediction_scores_list[0].permute(0, 2, 1),
             input_ids_list[0],
         )
-        caption_loss += snt_loss
+        l1 = 0.0
+        if gt is not None:
+            l1 = self.l1(hidden_features, gt)
+        caption_loss += snt_loss + l1
         caption_loss /= step_size
         return caption_loss, prediction_scores_list

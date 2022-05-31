@@ -224,7 +224,18 @@ class RecursiveCaptionDataset(data.Dataset):
             emb_feat = cv2.resize(image, (224, 224))
             feats.append(emb_feat)
         feats = np.array(feats)
-        return feats
+
+        gt_file_n = os.path.join(".", "ponnet_data", "future_frames", frame_dir)
+        gtfeats = []
+        for i in range(self.num_img):
+            file_name = "frames_" + str(i) + ".png"
+            img_path = os.path.join(gt_file_n, file_name)
+
+            image = cv2.imread(img_path)
+            emb_feat = cv2.resize(image, (224, 224))
+            gtfeats.append(emb_feat)
+        gtfeats = np.array(gtfeats)       
+        return feats, gtfeats
 
     def convert_example_to_features(self, example):
         """
@@ -243,7 +254,7 @@ class RecursiveCaptionDataset(data.Dataset):
         # raw_name: clip_id
         raw_name = example["clip_id"]
         # ver. future
-        emb_feat = self._load_ponnet_video_feature(
+        emb_feat, gt_feats = self._load_ponnet_video_feature(
             raw_name
         )
         video_feature = emb_feat
@@ -253,7 +264,8 @@ class RecursiveCaptionDataset(data.Dataset):
         cur_data, cur_meta = self.clip_sentence_to_feature(
             example["clip_id"],
             example["sentence"],
-            video_feature
+            video_feature,
+            gt_feats
         )
         # single_video_features: video特徴量を含むdict
         single_video_features.append(cur_data)
@@ -264,7 +276,8 @@ class RecursiveCaptionDataset(data.Dataset):
         self,
         name,
         sentence,
-        video_feature
+        video_feature,
+        gt_feats
     ):
         """
         make features for a single clip-sentence pair.
@@ -292,7 +305,8 @@ class RecursiveCaptionDataset(data.Dataset):
         coll_data = dict(
             name=name,
             input_ids=np.array(input_ids).astype(np.int64),
-            video_feature=feat.astype(np.float32)
+            video_feature=feat.astype(np.float32),
+            gt = gt_feats.astype(np.float32)
         )
         meta = dict(name=name, sentence=sentence)
         return coll_data, meta
